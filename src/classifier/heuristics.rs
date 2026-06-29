@@ -7,6 +7,12 @@ use crate::config::RulesConfig;
 use crate::models::{Classification, FileMeta};
 
 /// Пороговые значения для эвристик (могут быть переопределены конфигом).
+///
+/// Поля читаются после реализации `score`/`classify` (Этап 2).
+#[expect(
+    dead_code,
+    reason = "заглушка: поля используются после реализации todo в score/classify"
+)]
 pub struct Heuristics {
     /// Файлы старше N дней считаются "давно не использованными".
     stale_age_days: u32,

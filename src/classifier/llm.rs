@@ -5,9 +5,16 @@
 
 use crate::classifier::ClassifierLayer;
 use crate::config::LlmConfig;
+use crate::error::RustleError;
 use crate::models::{Classification, FileMeta};
 
 /// Клиент к локальной LLM (Ollama / llama.cpp, GGUF: Qwen / Llama 3).
+///
+/// Поля читаются после реализации запросов к Ollama (Этап 3).
+#[expect(
+    dead_code,
+    reason = "заглушка: поля используются после реализации todo в ask/classify"
+)]
 pub struct LlmClient {
     /// URL endpoint.
     endpoint: String,
@@ -39,7 +46,7 @@ impl LlmClient {
     ///
     /// @todo: POST на `{endpoint}/api/generate` (формат Ollama) с моделью
     /// `self.model`, распарсить ответ в `Classification`.
-    pub fn ask(&self, _prompt: &str) -> anyhow::Result<Classification> {
+    pub fn ask(&self, _prompt: &str) -> Result<Classification, RustleError> {
         todo!("вызвать Ollama API и вернуть Classification")
     }
 }

@@ -17,7 +17,7 @@ use crate::classifier::heuristics::Heuristics;
 use crate::classifier::llm::LlmClient;
 use crate::classifier::rules::Rules;
 use crate::config::RulesConfig;
-use crate::models::{Classification, ClassifierLevel, FileMeta, Recommendation};
+use crate::models::{Classification, FileMeta, Recommendation};
 
 /// Контекст классификатора: скомпилированные правила + LLM + кэш.
 pub struct Classifier {
@@ -60,10 +60,3 @@ pub trait ClassifierLayer {
 
 // Уровни классификатора реализуют `ClassifierLayer`.
 // @todo: реализовать `impl ClassifierLayer for Rules/Heuristics/LlmClient`.
-
-/// Утилита: какому `ClassifierLevel` соответствует уровень.
-pub(crate) fn level_of(layer: &dyn ClassifierLayer) -> ClassifierLevel {
-    // Идём по типу слоя через Any в реальной реализации.
-    let _ = layer;
-    ClassifierLevel::L1Rules
-}

@@ -8,6 +8,12 @@ use crate::config::RulesConfig;
 use crate::models::{Classification, FileMeta};
 
 /// Скомпилированный набор правил L1.
+///
+/// Поля читаются после реализации `ClassifierLayer::classify` (Этап 2).
+#[expect(
+    dead_code,
+    reason = "заглушка: поля используются после реализации todo в classify"
+)]
 pub struct Rules {
     /// Whitelist расширений → Keep.
     keep_exts: Vec<String>,

@@ -54,6 +54,10 @@ default = []
 # Включить интеграцию с локальной LLM (Ollama)
 llm = ["dep:reqwest"]
 
+# Дисциплина линтинга (Chapter 2.5): clippy::all включён на уровне пакета.
+[lints.clippy]
+all = "warn"
+
 [profile.release]
 lto = true
 codegen-units = 1

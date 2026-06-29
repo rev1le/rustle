@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::RustleError;
+
 /// Корневой конфиг rustle (десериализуется из TOML).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
@@ -20,7 +22,7 @@ pub struct Config {
     pub llm: LlmConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScannerConfig {
     /// Каталоги, которые всегда пропускаются (например, `.git`).
     #[serde(default)]
@@ -30,17 +32,11 @@ pub struct ScannerConfig {
     pub ignore_exts: Vec<String>,
 }
 
-impl Default for ScannerConfig {
-    fn default() -> Self {
-        Self {
-            ignore_dirs: Vec::new(),
-            ignore_exts: Vec::new(),
-        }
-    }
-}
-
 /// Пользовательские правила для L1 (расширения/паттерны) и L2 (эвристики).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+///
+/// `Default` реализован вручную, чтобы `llm_threshold` по умолчанию был `0.5`
+/// (как при сериализации), а не `0.0` от `f32::default()`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RulesConfig {
     /// Whitelist расширений (точно Keep).
     #[serde(default)]
@@ -55,6 +51,17 @@ pub struct RulesConfig {
     /// файл уходит в L3.
     #[serde(default = "default_threshold")]
     pub llm_threshold: f32,
+}
+
+impl Default for RulesConfig {
+    fn default() -> Self {
+        Self {
+            keep_exts: Vec::new(),
+            trash_exts: Vec::new(),
+            trash_patterns: Vec::new(),
+            llm_threshold: default_threshold(),
+        }
+    }
 }
 
 fn default_threshold() -> f32 {
@@ -83,7 +90,7 @@ impl Config {
     /// Загрузить конфиг из TOML-файла.
     ///
     /// @todo: реализовать чтение и парсинг TOML через `toml::from_str`.
-    pub fn load(path: &Path) -> anyhow::Result<Self> {
+    pub fn load(path: &Path) -> Result<Self, RustleError> {
         let _ = path;
         todo!("прочитать TOML из {:?} и десериализовать в Config", path)
     }
@@ -91,7 +98,7 @@ impl Config {
     /// Сохранить конфиг в TOML-файл (для команды `init`).
     ///
     /// @todo: реализовать сериализацию через `toml::to_string`.
-    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+    pub fn save(&self, path: &Path) -> Result<(), RustleError> {
         let _ = path;
         todo!("сериализовать Config в TOML и записать в {:?}", path)
     }

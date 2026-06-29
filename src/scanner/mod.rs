@@ -11,6 +11,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use walkdir::WalkDir;
 
 use crate::config::ScannerConfig;
+use crate::error::RustleError;
 use crate::models::FileMeta;
 
 /// Настройки конкретного прохода сканера.
@@ -35,7 +36,7 @@ pub struct ScanResult {
 /// Использует `walkdir` для обхода. `rayon` оставлен для будущей
 /// параллелизации сбора метаданных (см. roadmap). Каталоги/расширения
 /// из `options.ignore` отсекаются через `filter_entry` (без спуска внутрь).
-pub fn scan(options: &ScanOptions) -> anyhow::Result<ScanResult> {
+pub fn scan(options: &ScanOptions) -> Result<ScanResult, RustleError> {
     let ignore_dirs: Vec<String> = options
         .ignore
         .ignore_dirs
@@ -90,11 +91,11 @@ pub fn scan(options: &ScanOptions) -> anyhow::Result<ScanResult> {
             .and_then(|e| e.to_str())
             .map(|s| s.to_lowercase());
 
-        // Пропуск игнорируемых расширений.
-        if let Some(ref ext) = ext_lower {
-            if ignore_exts.iter().any(|e| e == ext) {
-                continue;
-            }
+        // Пропуск игнорируемых расширений (let-chain, edition 2024).
+        if let Some(ref ext) = ext_lower
+            && ignore_exts.iter().any(|e| e == ext)
+        {
+            continue;
         }
 
         let meta = match entry.metadata() {

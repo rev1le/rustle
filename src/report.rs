@@ -6,6 +6,7 @@ use std::path::Path;
 
 use serde::Serialize;
 
+use crate::error::RustleError;
 use crate::models::{FileMeta, Recommendation, human_readable_size};
 use crate::scanner::ScanResult;
 
@@ -28,7 +29,7 @@ impl Report {
 
     /// Сгенерировать JSON-отчёт и записать по пути `output`
     /// (или вывести в stdout, если `output` — None).
-    pub fn render(&self, output: Option<&Path>) -> anyhow::Result<()> {
+    pub fn render(&self, output: Option<&Path>) -> Result<(), RustleError> {
         let json = self.render_json()?;
         match output {
             Some(path) => std::fs::write(path, json)?,
@@ -42,7 +43,7 @@ impl Report {
     /// Включает сводку (количество/размер), топ самых больших файлов и
     /// рекомендации классификатора. Полный дамп всех файлов не выводится —
     /// отчёт должен быть компактным дайджестом.
-    fn render_json(&self) -> anyhow::Result<String> {
+    fn render_json(&self) -> Result<String, RustleError> {
         use crate::scanner::aggregator::top_largest;
 
         let total_size: u64 = self.scan.files.iter().map(|f| f.size).sum();

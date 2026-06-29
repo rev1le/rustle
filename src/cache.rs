@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use crate::error::RustleError;
 use crate::models::{Classification, FileMeta};
 
 /// Хранилище кэша классификаций, индексированное хэшем содержимого файла.
@@ -23,7 +24,7 @@ impl ClassificationCache {
     /// Посчитать BLAKE3-хэш содержимого файла (для дедупликации и кэша).
     ///
     /// @todo: реализовать потоковое хэширование через `blake3::Hasher`.
-    pub fn hash_file(path: &Path) -> anyhow::Result<[u8; 32]> {
+    pub fn hash_file(path: &Path) -> Result<[u8; 32], RustleError> {
         let _ = path;
         todo!("посчитать blake3 от содержимого {:?}", path)
     }
@@ -46,7 +47,7 @@ impl ClassificationCache {
     /// Записать кэш на диск.
     ///
     /// @todo: сериализовать через `serde_json` в файл кэша.
-    pub fn flush(&self) -> anyhow::Result<()> {
+    pub fn flush(&self) -> Result<(), RustleError> {
         todo!("записать кэш классификаций на диск")
     }
 }
