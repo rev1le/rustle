@@ -14,6 +14,8 @@ pub(super) const MAX_FILES: usize = 30;
 
 pub(super) const TICK_MS: u64 = 200;
 pub(super) const MARQUEE_PAUSE_TICKS: usize = 4;
+/// Сколько тиков живёт временное статусное сообщение в футере.
+pub(super) const STATUS_TTL_TICKS: usize = 20;
 
 /// Какая из двух панелей сейчас принимает ввод.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +33,13 @@ pub(super) struct App {
     pub(super) directories: Vec<DirAggregate>,
     pub(super) top_files: Vec<FileMeta>,
     pub(super) focus: Focus,
+    /// Фаза анимации бегущей строки для выделенной строки активной панели.
+    /// Сбрасывается в 0 при любой смене выделения/фокуса, нарастает каждый тик.
     pub(super) scroll_phase: usize,
+    /// Временное статусное сообщение (например, результат открытия файла).
+    pub(super) status: Option<String>,
+    /// Сколько тиков осталось показывать `status`, прежде чем он исчезнет.
+    pub(super) status_ttl: usize,
 }
 
 impl App {
@@ -56,6 +64,8 @@ impl App {
             top_files,
             focus: Focus::Directories,
             scroll_phase: 0,
+            status: None,
+            status_ttl: 0,
         }
     }
 
@@ -89,6 +99,19 @@ impl App {
     /// Продвинуть анимацию бегущей строки на один шаг (вызывается по таймеру).
     pub(super) fn tick(&mut self) {
         self.scroll_phase = self.scroll_phase.wrapping_add(1);
+        // Гасим статусное сообщение по истечении TTL.
+        if self.status_ttl > 0 {
+            self.status_ttl -= 1;
+            if self.status_ttl == 0 {
+                self.status = None;
+            }
+        }
+    }
+
+    /// Показать временное статусное сообщение в футере.
+    pub(super) fn set_status(&mut self, message: impl Into<String>) {
+        self.status = Some(message.into());
+        self.status_ttl = STATUS_TTL_TICKS;
     }
 }
 
@@ -234,5 +257,37 @@ mod tests {
         assert_eq!(app.scroll_phase, 1);
         app.switch_focus(1);
         assert_eq!(app.scroll_phase, 0);
+    }
+
+    #[test]
+    fn set_status_shows_message_with_ttl() {
+        let mut app = App::new(
+            PathBuf::from("/root"),
+            scan_of(vec![file("/root/a", 1, None)]),
+        );
+        assert!(app.status.is_none());
+
+        app.set_status("готово");
+        assert_eq!(app.status.as_deref(), Some("готово"));
+        assert_eq!(app.status_ttl, STATUS_TTL_TICKS);
+    }
+
+    #[test]
+    fn status_expires_after_ttl_ticks() {
+        let mut app = App::new(
+            PathBuf::from("/root"),
+            scan_of(vec![file("/root/a", 1, None)]),
+        );
+        app.set_status("временное");
+
+        // Прожить все тики, кроме последнего — сообщение ещё видно.
+        for _ in 0..STATUS_TTL_TICKS - 1 {
+            app.tick();
+            assert!(app.status.is_some(), "статус ещё должен показываться");
+        }
+        // Последний тик гасит сообщение.
+        app.tick();
+        assert!(app.status.is_none());
+        assert_eq!(app.status_ttl, 0);
     }
 }

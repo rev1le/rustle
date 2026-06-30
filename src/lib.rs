@@ -7,6 +7,7 @@ pub mod config;
 pub mod error;
 pub mod logger;
 pub mod models;
+pub mod platform;
 pub mod progress;
 pub mod report;
 pub mod scanner;

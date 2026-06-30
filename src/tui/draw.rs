@@ -33,7 +33,7 @@ pub(super) fn draw(
     draw_directories(app, frame, dirs, dir_state);
     draw_files(app, frame, files, file_state);
 
-    draw_footer(frame, footer);
+    draw_footer(app, frame, footer);
 }
 
 fn draw_header(app: &App, frame: &mut Frame, area: Rect) {
@@ -236,10 +236,14 @@ fn panel_title(title: &str, focus: Focus, panel: Focus) -> String {
     }
 }
 
-fn draw_footer(frame: &mut Frame, area: Rect) {
-    let help =
-        " ↑/↓ или j/k — навигация   ←/→ или h/l — переключение панелей   q/Esc/Ctrl-C — выход ";
-    let paragraph = Paragraph::new(help).block(Block::default().borders(Borders::ALL));
+fn draw_footer(app: &App, frame: &mut Frame, area: Rect) {
+    let help = " ↑/↓ или j/k — выбор   ←/→ или h/l — панель   Enter — открыть   y — копировать   q/Esc — выход ";
+    let paragraph = match &app.status {
+        Some(status) => Paragraph::new(format!(" {status} "))
+            .style(Style::default().fg(Color::Yellow))
+            .block(Block::default().borders(Borders::ALL)),
+        None => Paragraph::new(help).block(Block::default().borders(Borders::ALL)),
+    };
     frame.render_widget(paragraph, area);
 }
 

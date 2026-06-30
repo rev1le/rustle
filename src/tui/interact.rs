@@ -16,6 +16,7 @@ use ratatui::widgets::ListState;
 use super::app::{App, Focus, TICK_MS};
 use super::draw;
 use crate::error::RustleError;
+use crate::platform;
 use crate::scanner::ScanResult;
 
 /// RAII-обёртка над терминалом: захватывает raw-mode + альт. экран при
@@ -86,11 +87,45 @@ pub fn run(root: PathBuf, scan: ScanResult) -> Result<(), RustleError> {
                     Focus::Directories => app.move_directory_selection(&mut dir_state, -1),
                     Focus::Files => app.move_file_selection(&mut file_state, -1),
                 },
+                // Открыть выделенный путь в проводнике ОС.
+                KeyCode::Char('g') => {
+                    if let Some(path) = focused_selected_path(&app, &dir_state, &file_state) {
+                        match platform::open_in_explorer(&path) {
+                            Ok(()) => app.set_status(format!("Открываю: {}", path.display())),
+                            Err(e) => app.set_status(format!("Ошибка: {e}")),
+                        }
+                    }
+                }
+                // Скопировать путь выделенного элемента в буфер обмена.
+                KeyCode::Char('y') => {
+                    if let Some(path) = focused_selected_path(&app, &dir_state, &file_state) {
+                        match platform::copy_to_clipboard(&path.to_string_lossy()) {
+                            Ok(()) => app.set_status(format!("Скопировано: {}", path.display())),
+                            Err(e) => app.set_status(format!("Ошибка: {e}")),
+                        }
+                    }
+                }
                 _ => {}
             }
         } else {
             // Тик таймера — анимация бегущей строки.
             app.tick();
         }
+    }
+}
+
+/// Путь выделенного элемента в активной панели (если есть).
+fn focused_selected_path(
+    app: &App,
+    dir_state: &ListState,
+    file_state: &ListState,
+) -> Option<PathBuf> {
+    match app.focus {
+        Focus::Files => file_state
+            .selected()
+            .and_then(|i| app.top_files.get(i).map(|f| f.path.clone())),
+        Focus::Directories => dir_state
+            .selected()
+            .and_then(|i| app.directories.get(i).map(|d| d.path.clone())),
     }
 }
