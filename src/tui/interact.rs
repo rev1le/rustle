@@ -13,7 +13,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::widgets::ListState;
 
-use super::app::{App, Focus, TICK_MS};
+use super::app::{App, Focus, TICK_MS, View};
 use super::draw;
 use crate::error::RustleError;
 use crate::platform;
@@ -70,6 +70,14 @@ pub fn run(root: PathBuf, scan: ScanResult) -> Result<(), RustleError> {
                 continue;
             }
 
+            if app.view == View::FileDetail {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Backspace => app.close_detail(),
+                    _ => {}
+                }
+                continue;
+            }
+
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -87,6 +95,14 @@ pub fn run(root: PathBuf, scan: ScanResult) -> Result<(), RustleError> {
                     Focus::Directories => app.move_directory_selection(&mut dir_state, -1),
                     Focus::Files => app.move_file_selection(&mut file_state, -1),
                 },
+                KeyCode::Enter => {
+                    if app.focus == Focus::Files
+                        && let Some(idx) = file_state.selected()
+                        && let Some(file) = app.top_files.get(idx).cloned()
+                    {
+                        app.open_detail(file);
+                    }
+                }
                 // Открыть выделенный путь в проводнике ОС.
                 KeyCode::Char('g') => {
                     if let Some(path) = focused_selected_path(&app, &dir_state, &file_state) {

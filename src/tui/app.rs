@@ -24,6 +24,15 @@ pub(super) enum Focus {
     Files,
 }
 
+/// Какой экран TUI сейчас активен.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum View {
+    /// Основной: две панели + сводка.
+    Main,
+    /// Детали выбранного файла.
+    FileDetail,
+}
+
 /// Состояние TUI: агрегированные данные сканирования + навигация.
 pub(super) struct App {
     pub(super) root: PathBuf,
@@ -40,6 +49,10 @@ pub(super) struct App {
     pub(super) status: Option<String>,
     /// Сколько тиков осталось показывать `status`, прежде чем он исчезнет.
     pub(super) status_ttl: usize,
+    /// Текущий экран.
+    pub(super) view: View,
+    /// Файл, чьи детали показываются в [`View::FileDetail`].
+    pub(super) detail_file: Option<FileMeta>,
 }
 
 impl App {
@@ -66,6 +79,8 @@ impl App {
             scroll_phase: 0,
             status: None,
             status_ttl: 0,
+            view: View::Main,
+            detail_file: None,
         }
     }
 
@@ -112,6 +127,18 @@ impl App {
     pub(super) fn set_status(&mut self, message: impl Into<String>) {
         self.status = Some(message.into());
         self.status_ttl = STATUS_TTL_TICKS;
+    }
+
+    /// Открыть экран деталей файла.
+    pub(super) fn open_detail(&mut self, file: FileMeta) {
+        self.detail_file = Some(file);
+        self.view = View::FileDetail;
+    }
+
+    /// Закрыть экран деталей и вернуться к основному виду.
+    pub(super) fn close_detail(&mut self) {
+        self.view = View::Main;
+        self.detail_file = None;
     }
 }
 
@@ -289,5 +316,34 @@ mod tests {
         app.tick();
         assert!(app.status.is_none());
         assert_eq!(app.status_ttl, 0);
+    }
+
+    #[test]
+    fn open_detail_switches_view_and_stores_file() {
+        let mut app = App::new(
+            PathBuf::from("/root"),
+            scan_of(vec![file("/root/a.bin", 42, Some("bin"))]),
+        );
+        assert_eq!(app.view, View::Main);
+        assert!(app.detail_file.is_none());
+
+        let meta = app.top_files[0].clone();
+        app.open_detail(meta.clone());
+        assert_eq!(app.view, View::FileDetail);
+        assert_eq!(app.detail_file.as_ref().map(|f| f.size), Some(42));
+    }
+
+    #[test]
+    fn close_detail_returns_to_main() {
+        let mut app = App::new(
+            PathBuf::from("/root"),
+            scan_of(vec![file("/root/a.bin", 42, Some("bin"))]),
+        );
+        app.open_detail(app.top_files[0].clone());
+        assert_eq!(app.view, View::FileDetail);
+
+        app.close_detail();
+        assert_eq!(app.view, View::Main);
+        assert!(app.detail_file.is_none());
     }
 }

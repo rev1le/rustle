@@ -6,19 +6,30 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
-use super::app::{App, Focus, MARQUEE_PAUSE_TICKS};
-use crate::models::human_readable_size;
+use super::app::{App, Focus, MARQUEE_PAUSE_TICKS, View};
+use crate::models::{FileMeta, human_readable_size};
 
 /// Ширина текстовой полоски размера (в символах).
 const BAR_WIDTH: usize = 20;
 
-/// Отрисовать всё приложение: заголовок, две панели и футер.
+/// Отрисовать активный экран приложения.
 pub(super) fn draw(
     app: &App,
     frame: &mut Frame,
     dir_state: &mut ListState,
     file_state: &mut ListState,
 ) {
+    match app.view {
+        View::Main => draw_main(app, frame, dir_state, file_state),
+        View::FileDetail => {
+            if let Some(file) = &app.detail_file {
+                draw_detail(file, frame);
+            }
+        }
+    }
+}
+
+fn draw_main(app: &App, frame: &mut Frame, dir_state: &mut ListState, file_state: &mut ListState) {
     let [header, main, footer] = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(1),
@@ -237,7 +248,7 @@ fn panel_title(title: &str, focus: Focus, panel: Focus) -> String {
 }
 
 fn draw_footer(app: &App, frame: &mut Frame, area: Rect) {
-    let help = " ↑/↓ или j/k — выбор   ←/→ или h/l — панель   Enter — открыть   y — копировать   q/Esc — выход ";
+    let help = " ↑/↓ или j/k — выбор   ←/→ или h/l — панель   Enter — детали   g — открыть   y — копировать   q/Esc — выход ";
     let paragraph = match &app.status {
         Some(status) => Paragraph::new(format!(" {status} "))
             .style(Style::default().fg(Color::Yellow))
@@ -245,6 +256,61 @@ fn draw_footer(app: &App, frame: &mut Frame, area: Rect) {
         None => Paragraph::new(help).block(Block::default().borders(Borders::ALL)),
     };
     frame.render_widget(paragraph, area);
+}
+
+fn draw_detail(file: &FileMeta, frame: &mut Frame) {
+    let [header, body, footer] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(1),
+        Constraint::Length(3),
+    ])
+    .areas(frame.area());
+
+    // Заголовок: имя файла + краткая сводка (размер, расширение).
+    let name = file
+        .path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| file.path.display().to_string());
+    let ext = file.ext.as_deref().unwrap_or("без расширения");
+    let header_title = format!(" rustle — {name} ");
+    let header_stats = format!("{} · {ext}", human_readable_size(file.size));
+    frame.render_widget(
+        Paragraph::new(header_stats)
+            .block(Block::default().borders(Borders::ALL).title(header_title)),
+        header,
+    );
+
+    // Тело: все поля FileMeta.
+    let lines = vec![
+        Line::raw(format!(" {:<13}{}", "Путь:", file.path.display())),
+        Line::raw(format!(
+            " {:<13}{} ({} байт)",
+            "Размер:",
+            human_readable_size(file.size),
+            file.size
+        )),
+        Line::raw(format!(
+            " {:<13}{}",
+            "Расширение:",
+            file.ext.as_deref().unwrap_or("—")
+        )),
+        Line::raw(format!(
+            " {:<13}{} (UTC)",
+            "Изменён:",
+            file.mtime.format("%Y-%m-%d %H:%M:%S")
+        )),
+    ];
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Информация о файле ");
+    frame.render_widget(Paragraph::new(lines).block(block), body);
+
+    // Футер: подсказка возврата.
+    frame.render_widget(
+        Paragraph::new(" Esc/Backspace — назад ").block(Block::default().borders(Borders::ALL)),
+        footer,
+    );
 }
 
 #[cfg(test)]
@@ -355,5 +421,34 @@ mod tests {
         assert_eq!(display_label("abcdef", 3, true, 0), "abc");
         // неактивная/невыделенная — обрезка с …
         assert_eq!(display_label("abcdef", 3, false, 0), "ab…");
+    }
+
+    #[test]
+    fn draw_detail_renders_filemeta_fields_without_panic() {
+        let file = FileMeta {
+            path: PathBuf::from("/root/sub/big.bin"),
+            size: 4096,
+            ext: Some("bin".to_string()),
+            mtime: chrono::Utc::now(),
+        };
+
+        let backend = TestBackend::new(90, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw_detail(&file, frame)).unwrap();
+
+        let buf = terminal.backend().buffer();
+        let content: String = (0..buf.area.height)
+            .flat_map(|y| (0..buf.area.width).map(move |x| buf[(x, y)].symbol().to_string()))
+            .collect();
+
+        assert!(
+            content.contains("Информация о файле"),
+            "должен быть заголовок"
+        );
+        assert!(content.contains("big.bin"), "должен быть путь");
+        assert!(
+            content.contains("Расширение"),
+            "должна быть строка расширения"
+        );
     }
 }
