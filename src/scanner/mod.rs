@@ -55,7 +55,7 @@ fn get_file_meta(entry: &DirEntry, ignore_exts: &[String]) -> Option<FileMeta> {
 
     let meta = match entry.metadata() {
         Ok(m) => m,
-        Err(e) => return None,
+        Err(_) => return None,
     };
     let mtime = meta
         .modified()
