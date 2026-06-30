@@ -3,25 +3,25 @@
 //! Стек: `walkdir`/`ignore` — обход, `rayon` — параллелизм.
 
 pub mod aggregator;
-
+mod utils;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use indicatif::{ProgressBar, ProgressStyle};
-use walkdir::WalkDir;
+use walkdir::{DirEntry, WalkDir};
 
-use crate::config::ScannerConfig;
+use crate::config::IgnoreConfig;
 use crate::error::RustleError;
 use crate::models::FileMeta;
 
 /// Настройки конкретного прохода сканера.
 pub struct ScanOptions {
-    /// Корень обхода.
+    /// Путь для обхода
     pub root: PathBuf,
-    /// Максимальная глубина (None — без ограничений).
+    /// Максимальная глубина (None — без ограничений)
     pub max_depth: Option<usize>,
-    /// Игнорируемые каталоги/расширения (из TOML-конфига).
-    pub ignore: ScannerConfig,
+    /// Игнорируемые каталоги/расширения
+    pub ignore: IgnoreConfig,
 }
 
 /// Результат сканирования: все собранные метаданные файлов.
@@ -31,95 +31,113 @@ pub struct ScanResult {
     pub skipped: usize,
 }
 
-/// Рекурсивно обойти ФС от `root` и собрать метаданные файлов.
-///
-/// Использует `walkdir` для обхода. `rayon` оставлен для будущей
-/// параллелизации сбора метаданных (см. roadmap). Каталоги/расширения
-/// из `options.ignore` отсекаются через `filter_entry` (без спуска внутрь).
-pub fn scan(options: &ScanOptions) -> Result<ScanResult, RustleError> {
-    let ignore_dirs: Vec<String> = options
-        .ignore
-        .ignore_dirs
-        .iter()
-        .map(|s| s.to_lowercase())
-        .collect();
-    let ignore_exts: Vec<String> = options
-        .ignore
-        .ignore_exts
-        .iter()
-        .map(|s| s.to_lowercase())
-        .collect();
+fn get_file_meta(entry: &DirEntry, ignore_exts: &[String]) -> Option<FileMeta> {
+    let is_ignore_ext = |ext: &str| -> bool {
+        let ext_lower = ext.to_lowercase();
+        return ignore_exts.iter().any(|e| e == &ext_lower);
+    };
 
-    let walker = WalkDir::new(&options.root).follow_links(false);
+    if !entry.file_type().is_file() {
+        return None;
+    }
+
+    let path = entry.path();
+    let ext_lower = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase());
+
+    if let Some(ref ext) = ext_lower
+        && is_ignore_ext(ext)
+    {
+        return None;
+    }
+
+    let meta = match entry.metadata() {
+        Ok(m) => m,
+        Err(e) => return None,
+    };
+    let mtime = meta
+        .modified()
+        .map(DateTime::<Utc>::from)
+        .unwrap_or_else(|_| Utc::now());
+
+    return Some(FileMeta {
+        path: path.to_path_buf(),
+        size: meta.len(),
+        ext: ext_lower,
+        mtime,
+    });
+}
+
+/// Рекурсивно обойти путь
+pub fn scan(options: &ScanOptions) -> Result<ScanResult, RustleError> {
+    let IgnoreConfig {
+        ref ignore_dirs,
+        ref ignore_exts,
+    } = options.ignore;
+
+    let ignore_dirs = utils::to_lowercase_vec(ignore_dirs);
+    let ignore_exts = utils::to_lowercase_vec(ignore_exts);
+
+    let walker = WalkDir::new(&options.root);
     let walker = match options.max_depth {
         Some(d) => walker.max_depth(d),
         None => walker,
     };
 
-    // Спиннер: суммарное число файлов заранее неизвестно.
     let pb = ProgressBar::new_spinner();
     pb.set_style(ProgressStyle::with_template("{spinner} {pos} файлов просканировано").unwrap());
 
-    let mut files = Vec::new();
-    let mut skipped = 0usize;
+    log::info!(
+        "сканирование: {} (макс. глубина: {:?})",
+        options.root.display(),
+        options.max_depth
+    );
 
-    let it = walker.into_iter().filter_entry(|entry| {
-        // Не спускаемся в игнорируемые каталоги.
-        if entry.file_type().is_dir() {
-            let name = entry.file_name().to_string_lossy().to_lowercase();
-            !ignore_dirs.iter().any(|d| d == &name)
-        } else {
-            true
+    let mut files = Vec::new();
+    let mut skipped = 0_usize;
+
+    let is_ignore_entry = |entry: &DirEntry| -> bool {
+        if !entry.file_type().is_dir() {
+            return false;
         }
-    });
+
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+
+        return ignore_dirs.iter().any(|ignore_dir| ignore_dir == &name);
+    };
+
+    let it = walker
+        .into_iter()
+        .filter_entry(|entry| !is_ignore_entry(entry));
 
     for result in it {
         let entry = match result {
             Ok(e) => e,
-            Err(_) => {
+            Err(e) => {
+                log::debug!("пропуск записи walkdir: {e}");
                 skipped += 1;
                 continue;
             }
         };
-        if !entry.file_type().is_file() {
-            continue;
+
+        if let Some(file_meta) = get_file_meta(&entry, &ignore_exts) {
+            files.push(file_meta);
+        } else {
+            let path = entry.path();
+            log::debug!("пропуск {}", path.display());
+            skipped += 1;
         }
-
-        let path = entry.path();
-        let ext_lower = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|s| s.to_lowercase());
-
-        // Пропуск игнорируемых расширений (let-chain, edition 2024).
-        if let Some(ref ext) = ext_lower
-            && ignore_exts.iter().any(|e| e == ext)
-        {
-            continue;
-        }
-
-        let meta = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => {
-                skipped += 1;
-                continue;
-            }
-        };
-        let mtime = meta
-            .modified()
-            .map(DateTime::<Utc>::from)
-            .unwrap_or_else(|_| Utc::now());
-
-        files.push(FileMeta {
-            path: path.to_path_buf(),
-            size: meta.len(),
-            ext: ext_lower,
-            mtime,
-        });
         pb.inc(1);
     }
 
     pb.finish_with_message(format!("{} файлов", files.len()));
+    log::info!(
+        "сканирование завершено: {} файлов, {} пропущено",
+        files.len(),
+        skipped
+    );
 
     Ok(ScanResult { files, skipped })
 }

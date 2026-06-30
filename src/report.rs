@@ -32,8 +32,14 @@ impl Report {
     pub fn render(&self, output: Option<&Path>) -> Result<(), RustleError> {
         let json = self.render_json()?;
         match output {
-            Some(path) => std::fs::write(path, json)?,
-            None => println!("{json}"),
+            Some(path) => {
+                std::fs::write(path, json)?;
+                log::info!("отчёт записан в {}", path.display());
+            }
+            None => {
+                println!("{json}");
+                log::info!("отчёт выведен в stdout");
+            }
         }
         Ok(())
     }

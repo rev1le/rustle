@@ -13,7 +13,7 @@ use crate::error::RustleError;
 pub struct Config {
     /// Настройки сканера ФС.
     #[serde(default)]
-    pub scanner: ScannerConfig,
+    pub scanner: IgnoreConfig,
     /// Правила классификатора L1/L2.
     #[serde(default)]
     pub rules: RulesConfig,
@@ -23,7 +23,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ScannerConfig {
+pub struct IgnoreConfig {
     /// Каталоги, которые всегда пропускаются (например, `.git`).
     #[serde(default)]
     pub ignore_dirs: Vec<String>,
