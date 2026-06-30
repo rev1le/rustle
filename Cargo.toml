@@ -35,8 +35,17 @@ toml = "0.8"
 # Хэширование (для кэша ответов LLM и поиска дубликатов)
 blake3 = "1.5"
 
+# Встроенная KV-БД для кэша классификаций (Этап 3)
+sled = "0.34"
+
+# Расположение кэша по умолчанию (OS-specific cache dir)
+dirs = "5"
+
 # Локальная LLM (Этап 3) — клиент к Ollama API
-reqwest = { version = "0.12", features = ["blocking", "json"], default-features = false, optional = true }
+reqwest = { version = "0.12", features = [
+  "blocking",
+  "json",
+], default-features = false, optional = true }
 
 # Логирование
 log = "0.4"
@@ -53,6 +62,10 @@ thiserror = "1"
 default = []
 # Включить интеграцию с локальной LLM (Ollama)
 llm = ["dep:reqwest"]
+
+[dev-dependencies]
+# Временные каталоги для тестов кэша
+tempfile = "3"
 
 # Дисциплина линтинга (Chapter 2.5): clippy::all включён на уровне пакета.
 [lints.clippy]

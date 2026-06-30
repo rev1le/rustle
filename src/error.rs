@@ -13,4 +13,8 @@ pub enum RustleError {
     /// Ошибка (де)сериализации JSON.
     #[error("ошибка сериализации JSON: {0}")]
     Json(#[from] serde_json::Error),
+
+    /// Ошибка хранилища кэша (sled).
+    #[error("ошибка кэша классификаций: {0}")]
+    Cache(#[from] sled::Error),
 }
