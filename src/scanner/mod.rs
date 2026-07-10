@@ -32,7 +32,7 @@ pub struct ScanResult {
 fn get_file_meta(entry: &DirEntry, ignore_exts: &[String]) -> Option<FileMeta> {
     let is_ignore_ext = |ext: &str| -> bool {
         let ext_lower = ext.to_lowercase();
-        return ignore_exts.iter().any(|e| e == &ext_lower);
+        ignore_exts.iter().any(|e| e == &ext_lower)
     };
 
     if !entry.file_type().is_file() {
@@ -60,12 +60,12 @@ fn get_file_meta(entry: &DirEntry, ignore_exts: &[String]) -> Option<FileMeta> {
         .map(DateTime::<Utc>::from)
         .unwrap_or_else(|_| Utc::now());
 
-    return Some(FileMeta {
+    Some(FileMeta {
         path: path.to_path_buf(),
         size: meta.len(),
         ext: ext_lower,
         mtime,
-    });
+    })
 }
 
 /// Recursively traverse `root`
@@ -103,7 +103,7 @@ pub fn scan(options: &ScanOptions) -> Result<ScanResult, RustleError> {
 
         let name = entry.file_name().to_string_lossy().to_lowercase();
 
-        return ignore_dirs.iter().any(|ignore_dir| ignore_dir == &name);
+        ignore_dirs.iter().any(|ignore_dir| ignore_dir == &name)
     };
 
     let it = walker
