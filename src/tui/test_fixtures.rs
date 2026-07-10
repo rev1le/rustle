@@ -1,5 +1,3 @@
-//! Общие тестовые фикстуры для подмодулей TUI.
-
 use std::path::PathBuf;
 
 use chrono::Utc;
@@ -7,7 +5,7 @@ use chrono::Utc;
 use crate::models::FileMeta;
 use crate::scanner::ScanResult;
 
-/// Построить [`FileMeta`] с заданными путём, размером и расширением.
+/// Build a [`FileMeta`] with the given path, size, and extension
 pub(super) fn file(path: &str, size: u64, ext: Option<&str>) -> FileMeta {
     FileMeta {
         path: PathBuf::from(path),
@@ -17,7 +15,7 @@ pub(super) fn file(path: &str, size: u64, ext: Option<&str>) -> FileMeta {
     }
 }
 
-/// Собрать [`ScanResult`] из списка файлов (без пропусков).
+/// Assemble a [`ScanResult`] from a list of files (no skips)
 pub(super) fn scan_of(files: Vec<FileMeta>) -> ScanResult {
     ScanResult { files, skipped: 0 }
 }

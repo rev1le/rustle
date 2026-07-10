@@ -1,35 +1,25 @@
-//! Агрегация собранных метаданных по директориям (Этап 1 MVP).
+//! Aggregate metadata by directory
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use crate::models::{DirAggregate, FileMeta};
 
-/// Сгруппировать файлы по родительским директориям и посчитать
-/// суммарный размер, количество и распределение по расширениям.
-///
-/// Каждая директория учитывается рекурсивно (в стиле `du`): файл
-/// `/proj/sub/a.txt` увеличивает итоги для `/proj/sub`, `/proj` и корня.
-/// Результат отсортирован по убыванию суммарного размера.
-///
-/// Ключи расширений заимствуются у `files` (`&str`), поэтому клонирование
-/// `String` происходит только один раз на (каталог, расширение) — при сборке
-/// итогового вектора, а не на каждом предке файла.
+/// Group files by directory with size/count/per-ext breakdown
 pub fn aggregate(files: &[FileMeta]) -> Vec<DirAggregate> {
     // dir path → (total_size, file_count, ext → size)
     let mut dirs: BTreeMap<PathBuf, (u64, usize, HashMap<&str, u64>)> = BTreeMap::new();
 
     for file in files {
-        // ext_key живёт столько же, сколько `file` в `files` — клонировать не нужно.
-        let ext_key: &str = file.ext.as_deref().unwrap_or("(без ext)");
+        // borrows from `files`, no clone needed
+        let ext_key: &str = file.ext.as_deref().unwrap_or("(no ext)");
 
-        // ancestors() сначала отдаёт сам путь файла — пропускаем его,
-        // далее идут родительские каталоги вплоть до корня.
+        // skip the file's own path; ancestors() then yields parents up to root
         let mut ancestors = file.path.ancestors();
         ancestors.next();
 
         for dir in ancestors {
-            // Пропускаем пустой компонент (возникает у относительных путей).
+            // skip empty component (relative paths)
             if dir.as_os_str().is_empty() {
                 continue;
             }
@@ -61,7 +51,7 @@ pub fn aggregate(files: &[FileMeta]) -> Vec<DirAggregate> {
     result
 }
 
-/// Выбрать топ-N самых больших файлов (в порядке убывания размера).
+/// Top-N largest files, descending
 pub fn top_largest(files: &[FileMeta], n: usize) -> Vec<FileMeta> {
     let mut sorted: Vec<&FileMeta> = files.iter().collect();
     sorted.sort_by_key(|file| std::cmp::Reverse(file.size));
@@ -87,7 +77,7 @@ mod tests {
     fn find<'a>(agg: &'a [DirAggregate], path: &str) -> &'a DirAggregate {
         agg.iter()
             .find(|d| d.path == Path::new(path))
-            .unwrap_or_else(|| panic!("директория {path:?} не найдена в агрегате"))
+            .unwrap_or_else(|| panic!("directory {path:?} not found in aggregate"))
     }
 
     mod aggregate {
@@ -139,13 +129,12 @@ mod tests {
             let proj = find(&agg, "/proj");
 
             assert_eq!(proj.total_size, 50);
-            assert_eq!(proj.by_extension[0].0, "(без ext)");
+            assert_eq!(proj.by_extension[0].0, "(no ext)");
         }
 
         #[test]
         fn orders_sibling_dirs_by_size_desc() {
-            // Корень аккумулирует всё, поэтому проверяем порядок сестринских
-            // каталогов под общим родителем /tree.
+            // root accumulates all; check sibling order under /tree
             let agg = aggregate(&[
                 file("/tree/big/x", 1000, Some("bin")),
                 file("/tree/small/y", 10, Some("txt")),
@@ -159,7 +148,7 @@ mod tests {
                 .iter()
                 .position(|d| d.path == Path::new("/tree/small"))
                 .unwrap();
-            assert!(i_big < i_small, "/tree/big должен быть выше /tree/small");
+            assert!(i_big < i_small, "/tree/big must rank above /tree/small");
         }
 
         #[test]
@@ -211,7 +200,7 @@ mod tests {
 
     #[test]
     fn aggregate_size_formats_via_human_readable() {
-        // Дымовой тест: результат агрегации должен форматироваться без паник.
+        // smoke: aggregation result must format without panicking
         let agg = aggregate(&[file("/proj/x", 1_048_576, Some("iso"))]);
         assert_eq!(human_readable_size(agg[0].total_size), "1.00 MiB");
     }

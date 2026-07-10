@@ -1,64 +1,49 @@
-//! Основные модели данных проекта.
-//!
-//! См. раздел "Модель классификации" в ABOUT.md.
+//! Core data models
 
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Результат классификации файла.
-///
-/// Из ABOUT.md:
-/// ```rust,ignore
-/// enum Classification {
-///     Keep,
-///     Trash,
-///     Uncertain(f32), // score → порог вызова LLM
-/// }
-/// ```
+/// Result of classifying a file
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Classification {
-    /// Файл точно нужно оставить.
+    /// Definitely keep
     Keep,
-    /// Файл точно нужно удалить (мусор).
+    /// Definitely delete
     Trash,
-    /// Нужен уточняющий анализ (вызов LLM, если score ниже порога).
-    /// `score` в диапазоне 0.0..=1.0 — уверенность в том, что это мусор.
+    /// Needs a closer look; score 0.0..=1.0 is confidence it's trash
     Uncertain(f32),
 }
 
 impl Classification {
-    /// Является ли классификация окончательной (не требует LLM).
+    /// Whether this needs no LLM
     pub fn is_final(&self) -> bool {
         !matches!(self, Classification::Uncertain(_))
     }
 }
 
-/// Метаданные файла, собираемые сканером ФС.
-///
-/// Соответствует "Сбор метаданных: path, size, ext, mtime" (Этап 1 MVP).
+/// File metadata collected by the scanner
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMeta {
-    /// Полный путь к файлу.
+    /// Full path
     pub path: PathBuf,
-    /// Размер в байтах.
+    /// Size in bytes
     pub size: u64,
-    /// Расширение в нижнем регистре без точки (например, "raw", "log").
-    /// `None` у файлов без расширения.
+    /// Lowercase ext without the dot; `None` if none
     pub ext: Option<String>,
-    /// Время последней модификации.
+    /// Last modification time
     pub mtime: DateTime<Utc>,
 }
 
 impl FileMeta {
-    /// Размер в человекочитаемом виде (КиБ, МиБ, ГиБ).
+    /// Human-readable size
     pub fn human_size(&self) -> String {
         human_readable_size(self.size)
     }
 }
 
-/// Перевести размер в байтах в человекочитаемую строку (степени 1024).
+/// Bytes → human-readable string (powers of 1024)
 pub fn human_readable_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     if bytes == 0 {
@@ -77,46 +62,44 @@ pub fn human_readable_size(bytes: u64) -> String {
     }
 }
 
-/// Агрегированная статистика по директории.
-///
-/// Соответствует "Агрегация по директориям" (Этап 1 MVP).
+/// Per-directory aggregate stats
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirAggregate {
-    /// Путь к директории.
+    /// Directory path
     pub path: PathBuf,
-    /// Суммарный размер всех файлов внутри (рекурсивно).
+    /// Total size of files inside (recursive)
     pub total_size: u64,
-    /// Количество файлов.
+    /// File count
     pub file_count: usize,
-    /// Распределение по расширениям: (ext, размер).
+    /// (ext, size) breakdown
     pub by_extension: Vec<(String, u64)>,
 }
 
-/// Итоговая рекомендация по файлу: классификация + обоснование.
+/// Per-file recommendation: classification + rationale
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Recommendation {
-    /// Файл, к которому относится рекомендация.
+    /// The file
     pub file: FileMeta,
-    /// Классификация (Keep / Trash / Uncertain).
+    /// Keep / Trash / Uncertain
     pub classification: Classification,
-    /// Уровень классификатора, вынесший решение: L1, L2 или L3.
+    /// Deciding layer (L1/L2/L3)
     pub source: ClassifierLevel,
-    /// Человекочитаемая причина (для UI/отчётов).
+    /// Human-readable reason
     pub reason: String,
 }
 
-/// Уровень классификатора, вынесший вердикт.
+/// Which layer issued the verdict
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClassifierLevel {
-    /// Жёсткие правила (расширения, паттерны имён).
+    /// Hard rules
     L1Rules,
-    /// Эвристики (размер, возраст, путь).
+    /// Heuristics
     L2Heuristics,
-    /// Локальная LLM.
+    /// Local LLM
     L3Llm,
 }
 
-/// Топ-N самых больших файлов (Этап 1 MVP).
+/// Top-N largest files (Stage 1 MVP)
 pub struct TopFiles {
     pub entries: Vec<FileMeta>,
 }
@@ -127,10 +110,10 @@ mod tests {
 
     #[test]
     fn classification_is_final_matches_spec() {
-        // Окончательные вердикты не требуют вызова LLM.
+        // final verdicts skip the LLM
         assert!(Classification::Keep.is_final());
         assert!(Classification::Trash.is_final());
-        // Uncertain всегда требует уточнения.
+        // Uncertain always needs a closer look
         assert!(!Classification::Uncertain(0.0).is_final());
         assert!(!Classification::Uncertain(0.5).is_final());
         assert!(!Classification::Uncertain(0.99).is_final());
@@ -154,7 +137,7 @@ mod tests {
 
     #[test]
     fn human_readable_size_fractional() {
-        // 1 500 000 байт ≈ 1.43 MiB
+        // 1 500 000 bytes ≈ 1.43 MiB
         assert_eq!(human_readable_size(1_500_000), "1.43 MiB");
         // 2.5 KiB
         assert_eq!(human_readable_size(2 * 1024 + 512), "2.50 KiB");

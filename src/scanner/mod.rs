@@ -1,6 +1,4 @@
-//! Рекурсивный обход ФС и сбор метаданных (Этап 1 MVP).
-//!
-//! Стек: `walkdir`/`ignore` — обход, `rayon` — параллелизм.
+//! Recursive FS traversal and metadata collection
 
 pub mod aggregator;
 mod utils;
@@ -14,20 +12,20 @@ use crate::config::IgnoreConfig;
 use crate::error::RustleError;
 use crate::models::FileMeta;
 
-/// Настройки конкретного прохода сканера.
+/// Scanner pass settings
 pub struct ScanOptions {
-    /// Путь для обхода
+    /// Path to traverse
     pub root: PathBuf,
-    /// Максимальная глубина (None — без ограничений)
+    /// Maximum depth (None — unlimited)
     pub max_depth: Option<usize>,
-    /// Игнорируемые каталоги/расширения
+    /// Ignored directories/extensions
     pub ignore: IgnoreConfig,
 }
 
-/// Результат сканирования: все собранные метаданные файлов.
+/// Collected file metadata
 pub struct ScanResult {
     pub files: Vec<FileMeta>,
-    /// Количество пропущенных файлов (нет прав, симлинки и т.п.).
+    /// Skipped (no perms, symlinks, etc.)
     pub skipped: usize,
 }
 
@@ -70,7 +68,7 @@ fn get_file_meta(entry: &DirEntry, ignore_exts: &[String]) -> Option<FileMeta> {
     });
 }
 
-/// Рекурсивно обойти путь
+/// Recursively traverse `root`
 pub fn scan(options: &ScanOptions) -> Result<ScanResult, RustleError> {
     let IgnoreConfig {
         ref ignore_dirs,
@@ -87,10 +85,10 @@ pub fn scan(options: &ScanOptions) -> Result<ScanResult, RustleError> {
     };
 
     let pb = ProgressBar::new_spinner();
-    pb.set_style(ProgressStyle::with_template("{spinner} {pos} файлов просканировано").unwrap());
+    pb.set_style(ProgressStyle::with_template("{spinner} {pos} files scanned").unwrap());
 
     log::info!(
-        "сканирование: {} (макс. глубина: {:?})",
+        "scanning: {} (max depth: {:?})",
         options.root.display(),
         options.max_depth
     );
@@ -116,7 +114,7 @@ pub fn scan(options: &ScanOptions) -> Result<ScanResult, RustleError> {
         let entry = match result {
             Ok(e) => e,
             Err(e) => {
-                log::debug!("пропуск записи walkdir: {e}");
+                log::debug!("skipping walkdir entry: {e}");
                 skipped += 1;
                 continue;
             }
@@ -126,18 +124,14 @@ pub fn scan(options: &ScanOptions) -> Result<ScanResult, RustleError> {
             files.push(file_meta);
         } else {
             let path = entry.path();
-            log::debug!("пропуск {}", path.display());
+            log::debug!("skipping {}", path.display());
             skipped += 1;
         }
         pb.inc(1);
     }
 
-    pb.finish_with_message(format!("{} файлов", files.len()));
-    log::info!(
-        "сканирование завершено: {} файлов, {} пропущено",
-        files.len(),
-        skipped
-    );
+    pb.finish_with_message(format!("{} files", files.len()));
+    log::info!("scan complete: {} files, {} skipped", files.len(), skipped);
 
     Ok(ScanResult { files, skipped })
 }

@@ -1,4 +1,4 @@
-//! Экраны TUI и их общий интерфейс.
+//! TUI screens + common interface
 
 mod file_detail;
 mod main;
@@ -11,7 +11,7 @@ use crate::models::FileMeta;
 pub(super) use file_detail::FileDetailScreen;
 pub(super) use main::MainScreen;
 
-/// Идентификатор экрана
+/// Screen id
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum View {
     Main,
@@ -25,14 +25,14 @@ pub(super) enum Action {
     OpenDetail(FileMeta),
 }
 
-/// Поведение, общее для всех экранов TUI.
+/// Common behavior for all screens
 pub(super) trait Screen {
-    /// Отрисовать экран в переданный кадр.
+    /// Draw into the frame
     fn draw(&mut self, frame: &mut Frame);
 
-    /// Обработать нажатие клавиши и вернуть действие для приложения.
+    /// Handle a key, return an action
     fn handle_key(&mut self, key: KeyEvent) -> Action;
 
-    /// Продвинуть таймеры/анимацию на один шаг (вызывается по таймеру).
+    /// Advance timers/animation one step
     fn tick(&mut self) {}
 }

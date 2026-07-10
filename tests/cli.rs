@@ -1,4 +1,4 @@
-//! Интеграционные тесты
+//! Integration tests
 
 use std::process::Command;
 
@@ -15,7 +15,7 @@ fn cli_version_flag_works() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("rustle"),
-        "ожидается имя пакета в --version: {stdout}"
+        "expected the package name in --version: {stdout}"
     );
 }
 
@@ -32,7 +32,7 @@ fn cli_help_lists_all_subcommands() {
     for cmd in ["classify", "tui", "report"] {
         assert!(
             stdout.contains(cmd),
-            "в --help нет подкоманды `{cmd}`:\n{stdout}"
+            "subcommand `{cmd}` missing from --help:\n{stdout}"
         );
     }
 }

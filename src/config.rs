@@ -1,6 +1,4 @@
-//! Загрузка конфигурации правил из TOML (Этап 2).
-//!
-//! "Правила конфигурируемые (TOML)" — ключевое решение проекта.
+//! Rule config loaded from TOML
 
 use std::path::{Path, PathBuf};
 
@@ -8,47 +6,45 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::RustleError;
 
-/// Корневой конфиг rustle (десериализуется из TOML).
+/// Root config
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
-    /// Настройки сканера ФС.
+    /// Scanner settings
     #[serde(default)]
     pub scanner: IgnoreConfig,
-    /// Правила классификатора L1/L2.
+    /// L1/L2 rules
     #[serde(default)]
     pub rules: RulesConfig,
-    /// Настройки локальной LLM (Этап 3).
+    /// Local LLM settings
     #[serde(default)]
     pub llm: LlmConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IgnoreConfig {
-    /// Каталоги, которые всегда пропускаются (например, `.git`).
+    /// Always-skipped dirs (e.g. `.git`)
     #[serde(default)]
     pub ignore_dirs: Vec<String>,
-    /// Расширения, которые всегда пропускаются.
+    /// Always-skipped extensions
     #[serde(default)]
     pub ignore_exts: Vec<String>,
 }
 
-/// Пользовательские правила для L1 (расширения/паттерны) и L2 (эвристики).
+/// User-defined L1 (exts/patterns) and L2 (heuristics) rules
 ///
-/// `Default` реализован вручную, чтобы `llm_threshold` по умолчанию был `0.5`
-/// (как при сериализации), а не `0.0` от `f32::default()`.
+/// Manual `Default` so `llm_threshold` is 0.5, not `f32::default()`'s 0.0
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RulesConfig {
-    /// Whitelist расширений (точно Keep).
+    /// Extensions → Keep
     #[serde(default)]
     pub keep_exts: Vec<String>,
-    /// Blacklist расширений (точно Trash).
+    /// Extensions → Trash
     #[serde(default)]
     pub trash_exts: Vec<String>,
-    /// Паттерны имён мусора (thumbs.db, .DS_Store, ...).
+    /// Trash name patterns (thumbs.db, .DS_Store)
     #[serde(default)]
     pub trash_patterns: Vec<String>,
-    /// Порог уверенности для LLM: если Uncertain(score) и score < threshold,
-    /// файл уходит в L3.
+    /// Uncertain score below this goes to L3
     #[serde(default = "default_threshold")]
     pub llm_threshold: f32,
 }
@@ -68,12 +64,12 @@ fn default_threshold() -> f32 {
     0.5
 }
 
-/// Настройки подключения к локальной LLM (Ollama / llama.cpp).
+/// Local LLM connection (Ollama / llama.cpp)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
-    /// URL endpoint Ollama (по умолчанию http://localhost:11434).
+    /// Endpoint URL (default http://localhost:11434)
     pub endpoint: String,
-    /// Имя модели (например, "qwen2.5:7b" или "llama3:8b").
+    /// Model name (e.g. qwen2.5:7b)
     pub model: String,
 }
 
@@ -87,26 +83,26 @@ impl Default for LlmConfig {
 }
 
 impl Config {
-    /// Загрузить конфиг из TOML-файла.
+    /// Load from a TOML file
     ///
-    /// @todo: реализовать чтение и парсинг TOML через `toml::from_str`.
+    /// @todo parse via `toml::from_str`
     pub fn load(path: &Path) -> Result<Self, RustleError> {
         let _ = path;
-        todo!("прочитать TOML из {:?} и десериализовать в Config", path)
+        todo!("read TOML from {:?} and deserialize into Config", path)
     }
 
-    /// Сохранить конфиг в TOML-файл (для команды `init`).
+    /// Save to TOML (for the `init` command)
     ///
-    /// @todo: реализовать сериализацию через `toml::to_string`.
+    /// @todo serialize via `toml::to_string`
     pub fn save(&self, path: &Path) -> Result<(), RustleError> {
         let _ = path;
-        todo!("сериализовать Config в TOML и записать в {:?}", path)
+        todo!("serialize Config to TOML and write to {:?}", path)
     }
 
-    /// Найти конфиг по умолчанию: `./rustle.toml`, затем `~/.config/rustle/`.
+    /// Find default config: `./rustle.toml`, then `~/.config/rustle/`
     ///
-    /// @todo: реализовать поиск в стандартных расположениях.
+    /// @todo search standard locations
     pub fn discover() -> Option<PathBuf> {
-        todo!("найти rustle.toml в текущем каталоге и XDG-путях")
+        todo!("find rustle.toml in the cwd and XDG paths")
     }
 }

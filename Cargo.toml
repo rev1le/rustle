@@ -10,67 +10,67 @@ name = "rustle"
 path = "src/main.rs"
 
 [dependencies]
-# Обход файловой системы
+# Filesystem traversal
 walkdir = "2.5"
 ignore = "0.4"
 
-# Параллелизм
+# Parallelism
 rayon = "1.10"
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }
 
-# Прогресс-бары
+# Progress bars
 indicatif = "0.17"
 
-# TUI (Этап 4 — опционально)
+# TUI (Stage 4 — optional)
 ratatui = "0.28"
 crossterm = "0.28"
 
-# Сериализация и конфиг
+# Serialization and config
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 
-# Хэширование (для кэша ответов LLM и поиска дубликатов)
+# Hashing (LLM cache key + duplicate detection)
 blake3 = "1.5"
 
-# Встроенная KV-БД для кэша классификаций (Этап 3)
+# Embedded KV-DB for the classification cache (Stage 3)
 sled = "0.34"
 
-# Расположение кэша по умолчанию (OS-specific cache dir)
+# Default cache location (OS-specific cache dir)
 dirs = "5"
 
-# Локальная LLM (Этап 3) — клиент к Ollama API
+# Local LLM (Stage 3): Ollama API client
 reqwest = { version = "0.12", features = [
   "blocking",
   "json",
 ], default-features = false, optional = true }
 
-# Логирование
+# Logging
 log = "0.4"
 env_logger = "0.11"
 
-# Работа с временем
+# Time handling
 chrono = { version = "0.4", features = ["serde"] }
 
-# Обработка ошибок
+# Error handling
 anyhow = "1"
 thiserror = "1"
 
-# Буфер обмена (копирование пути в TUI)
+# Clipboard (copy path in TUI)
 arboard = "3"
 
 [features]
 default = []
-# Включить интеграцию с локальной LLM (Ollama)
+# Enable local LLM integration (Ollama)
 llm = ["dep:reqwest"]
 
 [dev-dependencies]
-# Временные каталоги для тестов кэша
+# Temp directories for cache tests
 tempfile = "3"
 
-# Дисциплина линтинга (Chapter 2.5): clippy::all включён на уровне пакета.
+# Linting discipline (Chapter 2.5): clippy::all at package level
 [lints.clippy]
 all = "warn"
 

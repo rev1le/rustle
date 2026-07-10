@@ -1,73 +1,73 @@
-## Концепция
-Утилита на Rust для анализа дискового пространства с классификацией файлов на "нужные" / "мусор" через многоуровневый AI-агент.
+## Concept
+A Rust utility for disk space analysis that classifies files as "needed" / "trash" via a multi-level AI agent.
 
-## Дифференциаторы
-- AI-классификация (эвристики + локальная LLM)
-- Контекст для фотографа (RAW, проекты) и фулстека (node_modules, кэш)
-- Приватность: LLM работает локально
+## Differentiators
+- AI classification (heuristics + local LLM)
+- Context for a photographer (RAW, projects) and a full-stack developer (node_modules, cache)
+- Privacy: the LLM runs locally
 
-## Архитектура
+## Architecture
 ```
-[Rust: сканер ФС] → [кэш/БД] → [роутер классификации]
-                                    ├─ L1: жёсткие правила (ext, паттерны)
-                                    ├─ L2: эвристики (размер, возраст, путь)
-                                    └─ L3: LLM-агент (только uncertain)
+[Rust: FS scanner] → [cache/DB] → [classification router]
+                                    ├─ L1: hard rules (ext, patterns)
+                                    ├─ L2: heuristics (size, age, path)
+                                    └─ L3: LLM agent (only uncertain)
                                         ↓
-                                    [рекомендации + UI]
+                                    [recommendations + UI]
 ```
 
-## Стек
-- `walkdir`/`ignore` — обход ФС
-- `rayon` — параллелизм
+## Stack
+- `walkdir`/`ignore` — filesystem traversal
+- `rayon` — parallelism
 - `clap` — CLI
-- `indicatif` — прогресс
-- `ratatui` + `crossterm` — TUI (опционально)
-- `serde` + `toml` — конфиг правил
-- Локальная LLM: Ollama / llama.cpp (Qwen/Llama 3 GGUF)
+- `indicatif` — progress
+- `ratatui` + `crossterm` — TUI (optional)
+- `serde` + `toml` — rules config
+- Local LLM: Ollama / llama.cpp (Qwen/Llama 3 GGUF)
 
-## Модель классификации
+## Classification model
 ```rust
 enum Classification {
     Keep,
     Trash,
-    Uncertain(f32), // score → порог вызова LLM
+    Uncertain(f32), // score → threshold for invoking the LLM
 }
 ```
 
 ## Road-map
 
-**Этап 1 — MVP (1-2 недели)**
-- [ ] Рекурсивный обход ФС с `walkdir`
-- [ ] Сбор метаданных: path, size, ext, mtime
-- [ ] Агрегация по директориям
-- [ ] Топ-N больших файлов
-- [ ] CLI-вывод через `clap`
+**Stage 1 — MVP (1-2 weeks)**
+- [ ] Recursive filesystem traversal with `walkdir`
+- [ ] Collect metadata: path, size, ext, mtime
+- [ ] Aggregation by directories
+- [ ] Top-N largest files
+- [ ] CLI output via `clap`
 
-**Этап 2 — Классификатор на правилах (1 неделя)**
-- [ ] Система whitelist/blacklist расширений
-- [ ] Паттерны мусора (thumbs.db, .DS_Store, node_modules)
-- [ ] Эвристики: возраст + размер
-- [ ] Конфиг в TOML (пользовательские правила)
+**Stage 2 — Rule-based classifier (1 week)**
+- [ ] Whitelist/blacklist of extensions
+- [ ] Trash patterns (thumbs.db, .DS_Store, node_modules)
+- [ ] Heuristics: age + size
+- [ ] Config in TOML (user-defined rules)
 
-**Этап 3 — AI-агент (1-2 недели)**
-- [ ] Интеграция с локальной LLM (Ollama API)
-- [ ] Формирование контекста для LLM
-- [ ] Кэширование ответов по хэшу файла
-- [ ] Порог уверенности для вызова LLM
+**Stage 3 — AI agent (1-2 weeks)**
+- [ ] Local LLM integration (Ollama API)
+- [ ] Build context for the LLM
+- [ ] Cache responses by file hash
+- [ ] Confidence threshold for invoking the LLM
 
-**Этап 4 — UX и визуализация (1 неделя)**
-- [ ] TUI через `ratatui` (дерево + heatmap)
-- [ ] Интерактивное удаление/архивация
-- [ ] Отчёты (HTML/JSON)
+**Stage 4 — UX and visualization (1 week)**
+- [ ] TUI via `ratatui` (tree + heatmap)
+- [ ] Interactive deletion/archiving
+- [ ] Reports (HTML/JSON)
 
-**Этап 5 — Продвинутое (опционально)**
-- [ ] Поиск дубликатов по хэшу
-- [ ] Анализ медиа (RAW/JPEG пары)
-- [ ] Веб-интерфейс (actix-web + treemap)
-- [ ] Кроссплатформенность (Win/Linux/macOS)
+**Stage 5 — Advanced (optional)**
+- [ ] Duplicate detection by hash
+- [ ] Media analysis (RAW/JPEG pairs)
+- [ ] Web interface (actix-web + treemap)
+- [ ] Cross-platform (Win/Linux/macOS)
 
-## Ключевые решения
-- LLM только локально (приватность)
-- Гибрид: эвристики сначала, LLM точечно
-- Правила конфигурируемые (TOML)
-- Кэш ответов LLM для повторных запусков
+## Key decisions
+- LLM runs locally only (privacy)
+- Hybrid: heuristics first, LLM on demand
+- Configurable rules (TOML)
+- Cache LLM responses across re-runs

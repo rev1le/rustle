@@ -1,12 +1,4 @@
-//! Роутер классификации: оркеструет L1 → L2 → L3.
-//!
-//! Из ABOUT.md:
-//! ```text
-//! [роутер классификации]
-//!     ├─ L1: жёсткие правила (ext, паттерны)
-//!     ├─ L2: эвристики (размер, возраст, путь)
-//!     └─ L3: LLM-агент (только uncertain)
-//! ```
+//! Classification router: orchestrates L1 → L2 → L3
 
 pub mod heuristics;
 pub mod llm;
@@ -19,7 +11,7 @@ use crate::classifier::rules::Rules;
 use crate::config::RulesConfig;
 use crate::models::{Classification, FileMeta, Recommendation};
 
-/// Контекст классификатора: скомпилированные правила + LLM + кэш.
+/// Classifier: compiled rules + LLM + cache
 pub struct Classifier {
     rules: Rules,
     heuristics: Heuristics,
@@ -37,26 +29,23 @@ impl Classifier {
         }
     }
 
-    /// Классифицировать один файл по цепочке L1 → L2 → L3.
+    /// Classify a file via the L1 → L2 → L3 cascade
     ///
-    /// Логика (см. ABOUT.md):
-    ///   1. L1 даёт окончательный ответ для известных ext/паттернов.
-    ///   2. Иначе L2 оценивает эвристиками; если уверенно — ответ.
-    ///   3. Иначе (Uncertain) — при наличии LLM вызываем её, иначе оставляем
-    ///      Uncertain.
+    /// L1: final answer for known ext/patterns
+    /// L2: heuristic score; confident → answer
+    /// L3: Uncertain → LLM if present, else stays Uncertain
     ///
-    /// @todo: реализовать каскад L1 → L2 → L3 с кэшированием по хэшу файла.
+    /// @todo implement with caching by file hash
     pub fn classify(&self, file: &FileMeta) -> Recommendation {
         let _ = (&self.rules, &self.heuristics, &self.llm, &self.cache);
-        todo!("классифицировать {:?}", file.path)
+        todo!("classify {:?}", file.path)
     }
 }
 
-/// Общий трейт уровней классификатора.
+/// Common trait for classifier layers
 pub trait ClassifierLayer {
-    /// Вернуть классификацию или `None`, если уровень не принял решения.
+    /// Classification, or `None` if this layer declines to decide
     fn classify(&self, file: &FileMeta) -> Option<(Classification, String)>;
 }
 
-// Уровни классификатора реализуют `ClassifierLayer`.
-// @todo: реализовать `impl ClassifierLayer for Rules/Heuristics/LlmClient`.
+// @todo impl ClassifierLayer for Rules/Heuristics/LlmClient

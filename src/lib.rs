@@ -1,4 +1,4 @@
-//! rustle — анализатор дискового пространства с многоуровневой AI-классификацией.
+//! rustle — disk space analyzer with multi-level AI classification
 
 pub mod cache;
 pub mod classifier;

@@ -1,31 +1,28 @@
-//! L3: локальная LLM-агент — только для uncertain-файлов (Этап 3).
-//!
-//! "Интеграция с локальной LLM (Ollama API)" и "Приватность: LLM работает
-//! локально" — ключевое решение проекта. Активируется только за фичей `llm`.
+//! L3: local LLM agent — only for uncertain files
 
 use crate::classifier::ClassifierLayer;
 use crate::config::LlmConfig;
 use crate::error::RustleError;
 use crate::models::{Classification, FileMeta};
 
-/// Клиент к локальной LLM (Ollama / llama.cpp, GGUF: Qwen / Llama 3).
+/// Client for a local LLM (Ollama / llama.cpp, GGUF: Qwen / Llama 3).
 ///
-/// Поля читаются после реализации запросов к Ollama (Этап 3).
+/// Fields are read once the Ollama requests are implemented (Stage 3).
 #[expect(
     dead_code,
-    reason = "заглушка: поля используются после реализации todo в ask/classify"
+    reason = "stub: fields are used once the todo in ask/classify is implemented"
 )]
 pub struct LlmClient {
-    /// URL endpoint.
+    /// Endpoint URL.
     endpoint: String,
-    /// Имя модели.
+    /// Model name.
     model: String,
 }
 
 impl LlmClient {
-    /// Создать клиент из конфига.
+    /// Build a client from config.
     ///
-    /// @todo: проверить доступность модели на endpoint.
+    /// @todo: verify that the model is available at the endpoint.
     pub fn new(config: &LlmConfig) -> Self {
         Self {
             endpoint: config.endpoint.clone(),
@@ -33,28 +30,29 @@ impl LlmClient {
         }
     }
 
-    /// Сформировать контекст (промпт) для LLM по файлу.
+    /// Build the context (prompt) for the LLM for a given file.
     ///
-    /// @todo: собрать компактное описание файла (path, ext, size, mtime,
-    /// соседние файлы) и инструкцию вернуть JSON `{verdict, confidence}`.
+    /// @todo: assemble a compact description of the file (path, ext, size,
+    /// mtime, neighboring files) and an instruction to return JSON
+    /// `{verdict, confidence}`.
     pub fn build_prompt(&self, file: &FileMeta) -> String {
         let _ = file;
-        todo!("построить промпт для LLM по {:?}", file.path)
+        todo!("build the LLM prompt for {:?}", file.path)
     }
 
-    /// Выполнить запрос к локальной LLM и распарсить вердикт.
+    /// Send a request to the local LLM and parse the verdict.
     ///
-    /// @todo: POST на `{endpoint}/api/generate` (формат Ollama) с моделью
-    /// `self.model`, распарсить ответ в `Classification`.
+    /// @todo: POST to `{endpoint}/api/generate` (Ollama format) with the
+    /// `self.model` model, parse the response into a `Classification`.
     pub fn ask(&self, _prompt: &str) -> Result<Classification, RustleError> {
-        todo!("вызвать Ollama API и вернуть Classification")
+        todo!("call the Ollama API and return a Classification")
     }
 }
 
 impl ClassifierLayer for LlmClient {
     fn classify(&self, file: &FileMeta) -> Option<(Classification, String)> {
         let _ = file;
-        // @todo: построить промпт, вызвать LLM, кэшировать по хэшу файла.
-        todo!("классифицировать {:?} через локальную LLM", file.path)
+        // @todo: build the prompt, call the LLM, cache by file hash.
+        todo!("classify {:?} via the local LLM", file.path)
     }
 }

@@ -1,7 +1,4 @@
-//! Интерактивный цикл TUI: захват терминала, обработка ввода.
-//!
-//! Цикл максимально тонкий: отрисовку, ввод и таймеры делегирует активному
-//! экрану через `App`; сам разбирается лишь с выходом (`Action::Quit`).
+//! TUI input loop: terminal capture + event polling
 
 use std::io::{self, Stdout};
 use std::path::PathBuf;
@@ -20,8 +17,7 @@ use super::views::Action;
 use crate::error::RustleError;
 use crate::scanner::ScanResult;
 
-/// RAII-обёртка над терминалом: захватывает raw-mode + альт. экран при
-/// создании и гарантированно восстанавливает состояние при падении/выходе.
+/// RAII: captures raw-mode + alt screen, restores on drop/panic
 struct TerminalGuard {
     terminal: Terminal<CrosstermBackend<Stdout>>,
 }
@@ -38,15 +34,14 @@ impl TerminalGuard {
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        // CONTEXT: восстановление терминала при выходе/панике — ошибки здесь
-        // уже не исправить, поэтому сознательно игнорируем.
+        // can't recover on drop — ignore errors
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
         let _ = disable_raw_mode();
         let _ = self.terminal.show_cursor();
     }
 }
 
-/// Запустить интерактивный TUI поверх результатов сканирования.
+/// Run the interactive TUI over scan results
 pub fn run(root: PathBuf, scan: ScanResult) -> Result<(), RustleError> {
     let mut app = App::new(root, scan);
     let mut guard = TerminalGuard::new()?;
@@ -54,8 +49,7 @@ pub fn run(root: PathBuf, scan: ScanResult) -> Result<(), RustleError> {
     loop {
         guard.terminal.draw(|frame| app.draw_active(frame))?;
 
-        // Ждём событие не дольше TICK_MS: если ничего не нажато — продвигаем
-        // анимацию активного экрана и перерисовываемся.
+        // poll up to TICK_MS; on timeout, advance animation and redraw
         if event::poll(Duration::from_millis(TICK_MS))? {
             let Event::Key(key) = event::read()? else {
                 continue;
@@ -68,7 +62,7 @@ pub fn run(root: PathBuf, scan: ScanResult) -> Result<(), RustleError> {
                 return Ok(());
             }
         } else {
-            // Тик таймера — анимация бегущей строки/статусы.
+            // timer tick: marquee + statuses
             app.tick();
         }
     }

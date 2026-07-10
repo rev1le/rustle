@@ -1,20 +1,12 @@
-//! Открытие путей во внешнем файловом менеджере ОС.
-//!
-//! Кроссплатформенный запуск «показать в проводнике»:
-//! - **Windows** — `explorer.exe` (для файла — с ключом `/select`,`);
-//! - **macOS** — `open -R` (reveal в Finder);
-//! - **Linux** — `xdg-open` родительского каталога (универсального способа
-//!   выделить файл в произвольном DE нет, поэтому открываем папку).
-//!
-//! Процесс запускается отсоединённым (`spawn`) и не блокирует TUI.
+//! Reveal paths in the OS file manager
 
 use std::io;
 use std::path::Path;
 use std::process::Command;
 
-/// Показать путь в файловом менеджере ОС.
+/// Reveal a path in the OS file manager
 ///
-/// Каталоги открываются напрямую, файлы — выделяются (reveal) в их каталоге.
+/// Dirs open directly; files are highlighted in their folder
 pub fn open_in_explorer(path: &Path) -> io::Result<()> {
     if path.is_dir() {
         open_dir(path)
@@ -23,10 +15,9 @@ pub fn open_in_explorer(path: &Path) -> io::Result<()> {
     }
 }
 
-/// Скопировать текст в системный буфер обмена.
+/// Copy text to the clipboard
 ///
-/// Используется крейт `arboard`, т.к. он корректно работает с Unicode
-/// (пути могут содержать кириллицу), в отличие от пайпа в `clip.exe`.
+/// `arboard` handles Unicode (paths may be non-ASCII), unlike piping to `clip.exe`
 pub fn copy_to_clipboard(text: &str) -> Result<(), arboard::Error> {
     arboard::Clipboard::new()?.set_text(text)?;
     Ok(())
@@ -42,8 +33,7 @@ fn open_dir(path: &Path) -> io::Result<()> {
 #[cfg(windows)]
 fn reveal_file(path: &Path) -> io::Result<()> {
     use std::os::windows::process::CommandExt;
-    // raw_arg нужен, чтобы Rust не переэкранировал уже закавыченный путь
-    // после `/select,` (обычный `.arg()` ломается на путях с пробелами).
+    // raw_arg avoids re-escaping the quoted path after /select,; .arg() breaks on spaces
     Command::new("explorer.exe")
         .raw_arg(format!("/select,\"{}\"", path.display()))
         .spawn()
@@ -59,11 +49,11 @@ fn open_dir(path: &Path) -> io::Result<()> {
 
 #[cfg(target_os = "macos")]
 fn reveal_file(path: &Path) -> io::Result<()> {
-    // -R — reveal в Finder (выделить файл в его каталоге).
+    // -R reveals in Finder
     Command::new("open").arg("-R").arg(path).spawn().map(drop)
 }
 
-// --- Linux / прочие Unix ---------------------------------------------------
+// --- Linux / other Unix ----------------------------------------------------
 
 #[cfg(not(any(windows, target_os = "macos")))]
 fn open_dir(path: &Path) -> io::Result<()> {
@@ -72,7 +62,7 @@ fn open_dir(path: &Path) -> io::Result<()> {
 
 #[cfg(not(any(windows, target_os = "macos")))]
 fn reveal_file(path: &Path) -> io::Result<()> {
-    // Универсального «выделить файл» в Linux нет — открываем родительский каталог.
+    // no universal reveal on Linux — open the parent dir
     let parent = path.parent().unwrap_or(path);
     Command::new("xdg-open").arg(parent).spawn().map(drop)
 }
@@ -82,15 +72,15 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "обращается к реальному системному буферу обмена; запускать вручную"]
+    #[ignore = "touches the real clipboard; run manually"]
     fn copy_to_clipboard_roundtrips_text() {
         // cargo test copy_to_clipboard -- --ignored
-        let text = "rustle-clipboard-test-путь/файл.txt";
-        copy_to_clipboard(text).expect("должен записать в буфер");
+        let text = "rustle-clipboard-test-path/file.txt";
+        copy_to_clipboard(text).expect("should write to the clipboard");
 
         let readback = arboard::Clipboard::new()
             .and_then(|mut cb| cb.get_text())
-            .expect("должен прочитать буфер");
+            .expect("should read the clipboard");
         assert_eq!(readback, text);
     }
 }

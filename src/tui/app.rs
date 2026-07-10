@@ -1,4 +1,4 @@
-//! Состояние приложения: карта экранов и диспетчеризация ввода/отрисовки.
+//! App state: screen map + input/draw dispatch
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -10,16 +10,14 @@ use super::views::{Action, FileDetailScreen, MainScreen, Screen, View};
 use crate::models::FileMeta;
 use crate::scanner::ScanResult;
 
-/// Период опроса ввода / тика анимации.
+/// Input poll / animation tick interval
 pub(super) const TICK_MS: u64 = 200;
 
-/// Корневое состояние TUI: карта экранов и активный экран.
+/// Root TUI state: screen map + active screen
 pub(super) struct App {
-    /// Активный экран — ключ в `views`.
+    /// Key into `views`
     pub(super) active: View,
-    /// Сохранённые состояния всех посещённых экранов.
-    /// При переключении значения не удаляются — данные прошлого экрана
-    /// сохраняются и восстанавливаются при возврате.
+    /// Visited screens are kept on switch so their state survives a return
     views: HashMap<View, Box<dyn Screen>>,
 }
 
@@ -33,37 +31,34 @@ impl App {
         }
     }
 
-    /// Активный экран (мутабельно).
+    /// Active screen, mutably
     fn screen_mut(&mut self) -> &mut dyn Screen {
         self.views
             .get_mut(&self.active)
-            .expect("активный экран всегда присутствует в карте")
+            .expect("active screen always present")
             .as_mut()
     }
 
-    /// Отрисовать активный экран.
+    /// Draw the active screen
     pub(super) fn draw_active(&mut self, frame: &mut Frame) {
         self.screen_mut().draw(frame);
     }
 
-    /// Продвинуть таймеры/анимацию активного экрана на один шаг.
+    /// Advance timers/animation one step
     pub(super) fn tick(&mut self) {
         self.screen_mut().tick();
     }
 
-    /// Обработать нажатие клавиши активным экраном.
+    /// Dispatch a key to the active screen
     ///
-    /// Возвращает `Action::Quit`, если приложение должно завершиться; переходы
-    /// между экранами (`OpenDetail`, `Back`) выполняются здесь же, над картой.
+    /// Returns `Action::Quit` to exit; screen transitions are applied to the map here
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> Action {
-        // Запрос экрана — владеемое значение, поэтому заимновение карты здесь
-        // заканчивается до того, как `apply` потребует мутабельный доступ.
+        // owned action ends the map borrow before `apply` mutates
         let action = self.screen_mut().handle_key(key);
         self.apply(action)
     }
 
-    /// Применить запрос экрана к карте: переходы гасятся в `None`, выход
-    /// прокидывается наверх к циклу ввода.
+    /// Apply transitions to the map; quit propagates up
     fn apply(&mut self, action: Action) -> Action {
         match action {
             Action::OpenDetail(file) => {
@@ -78,8 +73,7 @@ impl App {
         }
     }
 
-    /// Открыть экран деталей файла, замещая прежнее состояние деталей.
-    /// Состояние основного экрана сохраняется в карте.
+    /// Open file detail, replacing prior detail state (main state preserved)
     fn open_detail(&mut self, file: FileMeta) {
         self.views
             .insert(View::FileDetail, Box::new(FileDetailScreen::new(file)));
@@ -93,7 +87,7 @@ mod tests {
     use crate::tui::test_fixtures::{file, scan_of};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    /// Послать в приложение «нажатие» символьной клавиши без модификаторов.
+    /// Send a char key press with no modifiers
     fn press(ch: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)
     }
@@ -114,11 +108,11 @@ mod tests {
             scan_of(vec![file("/root/a.bin", 42, Some("bin"))]),
         );
 
-        // Переключаемся на панель файлов и открываем детали первого файла.
+        // switch to files panel, open first file's details
         app.handle_key(press('l'));
         let action = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(app.active, View::FileDetail);
-        // Переход обработан на уровне App — наружу возвращается None.
+        // App handles the transition — returns None
         assert!(matches!(action, Action::None));
     }
 
@@ -132,7 +126,7 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(app.active, View::FileDetail);
 
-        // Esc на экране деталей → назад.
+        // Esc on detail → back
         app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert_eq!(app.active, View::Main);
     }
@@ -166,15 +160,14 @@ mod tests {
             ]),
         );
 
-        // Основной экран продолжает отвечать после возврата из деталей:
-        // состояние основного экрана не удалялось из карты.
+        // main screen still responds after returning: its state was kept
         app.handle_key(press('l'));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(app.active, View::FileDetail);
         app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert_eq!(app.active, View::Main);
 
-        // Повторный переход работает — основной экран «жив».
+        // second transition works — main screen is alive
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(app.active, View::FileDetail);
     }

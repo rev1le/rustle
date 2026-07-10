@@ -12,17 +12,17 @@ use crate::models::{DirAggregate, FileMeta, human_readable_size};
 use crate::platform;
 use crate::scanner::ScanResult;
 
-/// Ширина текстовой полоски размера (в символах).
+/// Size bar width in chars
 const BAR_WIDTH: usize = 20;
-/// Сколько каталогов показывать в основной панели.
+/// Dirs shown in the main panel
 const MAX_DIRS: usize = 50;
-/// Сколько файлов показывать в боковой панели.
+/// Files shown in the side panel
 const MAX_FILES: usize = 30;
 const MARQUEE_PAUSE_TICKS: usize = 4;
-/// Сколько тиков живёт временное статусное сообщение в футере.
+/// Ticks a footer status lives
 const STATUS_TTL_TICKS: usize = 20;
 
-/// Какая из двух панелей сейчас принимает ввод.
+/// Which panel has focus
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Focus {
     Directories,
@@ -39,9 +39,9 @@ pub(in crate::tui) struct MainScreen {
     focus: Focus,
     dir_state: ListState,
     file_state: ListState,
-    /// Фаза анимации бегущей строки
+    /// Marquee phase
     scroll_phase: usize,
-    /// Временное статусное сообщение (например, результат открытия файла).
+    /// Temporary status (e.g. open result)
     status: Option<String>,
     status_ttl: usize,
 }
@@ -52,7 +52,7 @@ impl MainScreen {
         let total_files = scan.files.len();
         let skipped = scan.skipped;
 
-        // Только подкаталоги внутри корня — отсекаем сам корень и родителей
+        // only subdirs inside root — drop root and parents
         let mut directories = crate::scanner::aggregator::aggregate(&scan.files);
         directories.retain(|d| d.path != root && d.path.starts_with(&root));
         directories.truncate(MAX_DIRS);
@@ -97,7 +97,7 @@ impl MainScreen {
         }
     }
 
-    /// Переключить фокус между панелями
+    /// Switch focus between panels
     fn switch_focus(&mut self, direction: isize) {
         self.focus = match (self.focus, direction) {
             (Focus::Directories, 1) => Focus::Files,
@@ -107,7 +107,7 @@ impl MainScreen {
         self.scroll_phase = 0;
     }
 
-    /// Файл, выделенный в панели файлов
+    /// Highlighted file in the files panel
     fn selected_file(&self) -> Option<FileMeta> {
         if self.focus != Focus::Files {
             return None;
@@ -117,7 +117,7 @@ impl MainScreen {
             .and_then(|i| self.top_files.get(i).cloned())
     }
 
-    /// Путь выделенного элемента в активной панели
+    /// Highlighted path in the active panel
     fn focused_selected_path(&self) -> Option<PathBuf> {
         match self.focus {
             Focus::Files => self
@@ -131,27 +131,27 @@ impl MainScreen {
         }
     }
 
-    /// Открыть выделенный путь в проводнике ОС
+    /// Open the highlighted path in the OS file manager
     fn open_selected_in_explorer(&mut self) {
         if let Some(path) = self.focused_selected_path() {
             match platform::open_in_explorer(&path) {
-                Ok(()) => self.set_status(format!("Открываю: {}", path.display())),
-                Err(e) => self.set_status(format!("Ошибка: {e}")),
+                Ok(()) => self.set_status(format!("Opening: {}", path.display())),
+                Err(e) => self.set_status(format!("Error: {e}")),
             }
         }
     }
 
-    /// Скопировать путь выделенного элемента в буфер обмена
+    /// Copy the highlighted path to the clipboard
     fn copy_selected_path(&mut self) {
         if let Some(path) = self.focused_selected_path() {
             match platform::copy_to_clipboard(&path.to_string_lossy()) {
-                Ok(()) => self.set_status(format!("Скопировано: {}", path.display())),
-                Err(e) => self.set_status(format!("Ошибка: {e}")),
+                Ok(()) => self.set_status(format!("Copied: {}", path.display())),
+                Err(e) => self.set_status(format!("Error: {e}")),
             }
         }
     }
 
-    /// Показать временное статусное сообщение в футере
+    /// Show a temporary footer status
     fn set_status(&mut self, message: impl Into<String>) {
         self.status = Some(message.into());
         self.status_ttl = STATUS_TTL_TICKS;
@@ -160,7 +160,7 @@ impl MainScreen {
     fn render_header(&self, frame: &mut Frame, area: Rect) {
         let title = format!(" rustle — {} ", self.root.display());
         let stats = format!(
-            "файлов: {} | пропущено: {} | всего: {}",
+            "files: {} | skipped: {} | total: {}",
             self.total_files,
             self.skipped,
             human_readable_size(self.total_size)
@@ -173,7 +173,7 @@ impl MainScreen {
     fn render_directories(&mut self, frame: &mut Frame, area: Rect) {
         let max_size = self.directories.first().map_or(0, |d| d.total_size);
         let selected = self.dir_state.selected();
-        // Доступная ширина имени каталога
+        // available dir name width
         let name_width = name_width_for(area, 21 + 11);
 
         let items: Vec<ListItem<'_>> = self
@@ -188,7 +188,7 @@ impl MainScreen {
                     dir.total_size as f64 / max_size as f64
                 };
                 let filled = (ratio * BAR_WIDTH as f64).round() as usize;
-                // Unicode-эскейпы намеренно: сырые глифы █/░ искажались при правках.
+                // escapes intentional: raw █/░ glyphs got mangled in edits
                 let bar = format!(
                     "{}{}",
                     "\u{2588}".repeat(filled),
@@ -216,7 +216,7 @@ impl MainScreen {
                     .borders(Borders::ALL)
                     .border_style(panel_border_style(self.focus, Focus::Directories))
                     .title(panel_title(
-                        "Каталоги по размеру",
+                        "Directories by size",
                         self.focus,
                         Focus::Directories,
                     )),
@@ -233,7 +233,7 @@ impl MainScreen {
 
     fn render_files(&mut self, frame: &mut Frame, area: Rect) {
         let selected = self.file_state.selected();
-        // Доступная ширина имени файла: [размер:11] [расш:9] + рамка(2) + маркер(2)
+        // available name width: [size:11] [ext:9] + border(2) + marker(2)
         let name_width = name_width_for(area, 11 + 9);
 
         let items: Vec<ListItem<'_>> = self
@@ -262,7 +262,7 @@ impl MainScreen {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(panel_border_style(self.focus, Focus::Files))
-                    .title(panel_title("Самые большие файлы", self.focus, Focus::Files)),
+                    .title(panel_title("Largest files", self.focus, Focus::Files)),
             )
             .highlight_style(
                 Style::default()
@@ -275,7 +275,7 @@ impl MainScreen {
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        let help = " ↑/↓ или j/k — выбор   ←/→ или h/l — панель   Enter — детали   g — открыть   y — копировать   q/Esc — выход ";
+        let help = " Up/Dn or j/k — select   ←/→ or h/l — panel   Enter — details   g — open   y — copy   q/Esc — quit ";
         let paragraph = match &self.status {
             Some(status) => Paragraph::new(format!(" {status} "))
                 .style(Style::default().fg(Color::Yellow))
@@ -310,7 +310,7 @@ impl Screen for MainScreen {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Action::Quit,
-            // Горизонтальная навигация: переключаем активную панель.
+            // horizontal: switch panel
             KeyCode::Right | KeyCode::Char('l') => {
                 self.switch_focus(1);
                 Action::None
@@ -319,7 +319,7 @@ impl Screen for MainScreen {
                 self.switch_focus(-1);
                 Action::None
             }
-            // Вертикальная навигация действует на активную панель.
+            // vertical: moves active panel
             KeyCode::Down | KeyCode::Char('j') => {
                 self.move_focused(1);
                 Action::None
@@ -332,12 +332,12 @@ impl Screen for MainScreen {
                 Some(file) => Action::OpenDetail(file),
                 None => Action::None,
             },
-            // Открыть выделенный путь в проводнике ОС.
+            // open in OS file manager
             KeyCode::Char('g') => {
                 self.open_selected_in_explorer();
                 Action::None
             }
-            // Скопировать путь выделенного элемента в буфер обмена.
+            // copy path to clipboard
             KeyCode::Char('y') => {
                 self.copy_selected_path();
                 Action::None
@@ -348,7 +348,7 @@ impl Screen for MainScreen {
 
     fn tick(&mut self) {
         self.scroll_phase = self.scroll_phase.wrapping_add(1);
-        // Гасим статусное сообщение по истечении TTL.
+        // clear status when TTL hits 0
         if self.status_ttl > 0 {
             self.status_ttl -= 1;
             if self.status_ttl == 0 {
@@ -358,7 +358,7 @@ impl Screen for MainScreen {
     }
 }
 
-/// Общий helper сдвига выделения в `ListState` для списка длины `len`.
+/// Shift a `ListState` selection, clamped to `len`
 fn move_stateful_selection(state: &mut ListState, len: usize, delta: isize) {
     if len == 0 {
         return;
@@ -368,12 +368,12 @@ fn move_stateful_selection(state: &mut ListState, len: usize, delta: isize) {
     state.select(Some(next));
 }
 
-/// Доступная ширина текста строки в панели
+/// Available row text width in a panel
 fn name_width_for(area: Rect, prefix_len: usize) -> usize {
     (area.width as usize).saturating_sub(2 + 2 + prefix_len)
 }
 
-/// Текст метки строки с учётом переполнения
+/// Row label, handling overflow
 fn display_label(text: &str, width: usize, active_and_selected: bool, phase: usize) -> String {
     if width == 0 {
         return String::new();
@@ -385,7 +385,7 @@ fn display_label(text: &str, width: usize, active_and_selected: bool, phase: usi
     }
 }
 
-/// Окно бегущей строки: прокрутка с паузами в начале и в конце
+/// Marquee window: scroll with pauses at both ends
 fn marquee_window(text: &str, width: usize, phase: usize) -> String {
     let chars: Vec<char> = text.chars().collect();
     let len = chars.len();
@@ -396,19 +396,19 @@ fn marquee_window(text: &str, width: usize, phase: usize) -> String {
     let period = MARQUEE_PAUSE_TICKS * 2 + scroll_range;
     let p = phase % period;
     let offset = if p < MARQUEE_PAUSE_TICKS {
-        // пауза в начале — показываем старт строки
+        // start pause: show beginning
         0
     } else if p < MARQUEE_PAUSE_TICKS + scroll_range {
-        // прокрутка
+        // scrolling
         p - MARQUEE_PAUSE_TICKS
     } else {
-        // пауза в конце — показываем хвост строки
+        // end pause: show tail
         scroll_range
     };
     chars[offset..offset + width].iter().collect()
 }
 
-/// Обрезать текст до `width` символов, добавляя `…`, если он не влезает
+/// Truncate to `width`, appending `…` on overflow
 fn truncate_to(text: &str, width: usize) -> String {
     let chars: Vec<char> = text.chars().collect();
     if chars.len() <= width {
@@ -422,7 +422,7 @@ fn truncate_to(text: &str, width: usize) -> String {
     }
 }
 
-/// Стиль рамки панели: активная подсвечена, неактивная приглушена.
+/// Border style: active highlighted, inactive dimmed
 fn panel_border_style(focus: Focus, panel: Focus) -> Style {
     if focus == panel {
         Style::default().fg(Color::Cyan)
@@ -431,7 +431,7 @@ fn panel_border_style(focus: Focus, panel: Focus) -> Style {
     }
 }
 
-/// Заголовок панели: у активной добавлен маркер `◀`.
+/// Title: active panel gets a `◀`
 fn panel_title(title: &str, focus: Focus, panel: Focus) -> String {
     if focus == panel {
         format!(" {title} ◀ ")
@@ -456,7 +456,7 @@ mod tests {
                 file("/root/sub2/y", 2, None),
             ]),
         );
-        // После агрегации остаются два подкаталога (сам /root отсечён).
+        // two subdirs remain after aggregation (/root cut off)
         assert_eq!(screen.directories.len(), 2);
 
         screen.move_directory_selection(100);
@@ -507,7 +507,7 @@ mod tests {
             ]),
         );
 
-        // По умолчанию активна панель каталогов.
+        // dirs panel active by default
         assert_eq!(screen.focus, Focus::Directories);
 
         screen.switch_focus(-1);
@@ -550,11 +550,11 @@ mod tests {
         screen.tick();
         assert_eq!(screen.scroll_phase, 3);
 
-        // Смена выделения в каталогах сбрасывает фазу.
+        // moving dir selection resets phase
         screen.move_directory_selection(1);
         assert_eq!(screen.scroll_phase, 0);
 
-        // Переключение фокуса тоже сбрасывает.
+        // focus switch resets too
         screen.tick();
         assert_eq!(screen.scroll_phase, 1);
         screen.switch_focus(1);
@@ -569,8 +569,8 @@ mod tests {
         );
         assert!(screen.status.is_none());
 
-        screen.set_status("готово");
-        assert_eq!(screen.status.as_deref(), Some("готово"));
+        screen.set_status("done");
+        assert_eq!(screen.status.as_deref(), Some("done"));
         assert_eq!(screen.status_ttl, STATUS_TTL_TICKS);
     }
 
@@ -580,11 +580,11 @@ mod tests {
             PathBuf::from("/root"),
             scan_of(vec![file("/root/a", 1, None)]),
         );
-        screen.set_status("временное");
+        screen.set_status("temporary");
 
         for _ in 0..STATUS_TTL_TICKS - 1 {
             screen.tick();
-            assert!(screen.status.is_some(), "статус ещё должен показываться");
+            assert!(screen.status.is_some(), "status should still be shown");
         }
         screen.tick();
         assert!(screen.status.is_none());
@@ -597,7 +597,7 @@ mod tests {
             PathBuf::from("/root"),
             scan_of(vec![file("/root/a.bin", 42, Some("bin"))]),
         );
-        // По умолчанию фокус на каталогах — файла нет.
+        // focus on dirs by default — no file
         assert!(screen.selected_file().is_none());
 
         screen.switch_focus(1);
@@ -636,11 +636,11 @@ mod tests {
             .collect();
 
         assert!(
-            content.contains("Каталоги"),
-            "должен быть заголовок панели каталогов"
+            content.contains("Directories"),
+            "directories panel title must be present"
         );
-        assert!(content.contains("файлы"), "должна быть сводка по файлам");
-        // Полоска размера содержит заполнители (█) или фон (░).
+        assert!(content.contains("files"), "files summary must be present");
+        // bar has fillers (█) or background (░)
         assert!(content.contains('█') || content.contains('░'));
     }
 

@@ -1,6 +1,4 @@
-//! Экран деталей выбранного файла: показывает все поля `FileMeta`.
-//!
-//! Логика простая — отрисовать сведения о файле и вернуться назад по Esc.
+//! File detail screen: shows all `FileMeta` fields
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
@@ -11,7 +9,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use super::{Action, Screen};
 use crate::models::{FileMeta, human_readable_size};
 
-/// Состояние экрана деталей файла.
+/// File detail state
 pub(in crate::tui) struct FileDetailScreen {
     file: FileMeta,
 }
@@ -21,8 +19,7 @@ impl FileDetailScreen {
         Self { file }
     }
 
-    /// Отрисовка деталей файла (вынесена отдельно от `draw`, чтобы принимать
-    /// неизменяемую ссылку на файл).
+    /// Split from `draw` to borrow the file immutably
     fn render_detail(file: &FileMeta, frame: &mut Frame) {
         let [header, body, footer] = Layout::vertical([
             Constraint::Length(3),
@@ -31,13 +28,13 @@ impl FileDetailScreen {
         ])
         .areas(frame.area());
 
-        // Заголовок: имя файла + краткая сводка (размер, расширение).
+        // header: name + size/ext summary
         let name = file
             .path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| file.path.display().to_string());
-        let ext = file.ext.as_deref().unwrap_or("без расширения");
+        let ext = file.ext.as_deref().unwrap_or("no extension");
         let header_title = format!(" rustle — {name} ");
         let header_stats = format!("{} · {ext}", human_readable_size(file.size));
         frame.render_widget(
@@ -46,34 +43,34 @@ impl FileDetailScreen {
             header,
         );
 
-        // Тело: все поля FileMeta.
+        // body: all FileMeta fields
         let lines = vec![
-            Line::raw(format!(" {:<13}{}", "Путь:", file.path.display())),
+            Line::raw(format!(" {:<13}{}", "Path:", file.path.display())),
             Line::raw(format!(
-                " {:<13}{} ({} байт)",
-                "Размер:",
+                " {:<13}{} ({} bytes)",
+                "Size:",
                 human_readable_size(file.size),
                 file.size
             )),
             Line::raw(format!(
                 " {:<13}{}",
-                "Расширение:",
+                "Extension:",
                 file.ext.as_deref().unwrap_or("—")
             )),
             Line::raw(format!(
                 " {:<13}{} (UTC)",
-                "Изменён:",
+                "Modified:",
                 file.mtime.format("%Y-%m-%d %H:%M:%S")
             )),
         ];
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(" Информация о файле ");
+            .title(" File information ");
         frame.render_widget(Paragraph::new(lines).block(block), body);
 
-        // Футер: подсказка возврата.
+        // footer: back hint
         frame.render_widget(
-            Paragraph::new(" Esc/Backspace — назад ").block(Block::default().borders(Borders::ALL)),
+            Paragraph::new(" Esc/Backspace — back ").block(Block::default().borders(Borders::ALL)),
             footer,
         );
     }
@@ -122,13 +119,13 @@ mod tests {
             .collect();
 
         assert!(
-            content.contains("Информация о файле"),
-            "должен быть заголовок"
+            content.contains("File information"),
+            "header must be present"
         );
-        assert!(content.contains("big.bin"), "должен быть путь");
+        assert!(content.contains("big.bin"), "path must be present");
         assert!(
-            content.contains("Расширение"),
-            "должна быть строка расширения"
+            content.contains("Extension"),
+            "extension row must be present"
         );
     }
 

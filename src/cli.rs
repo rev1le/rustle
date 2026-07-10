@@ -12,7 +12,7 @@ use clap::{Parser, Subcommand};
     disable_version_flag = true
 )]
 pub struct Cli {
-    /// Уровень логирования.
+    /// Log verbosity level
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
 
@@ -23,27 +23,27 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Classify {
-        /// Корневая директория
+        /// Root directory
         root: PathBuf,
-        /// Путь к TOML-конфигу пользовательских правил
+        /// TOML config of user rules
         #[arg(short, long, default_value = "rustle.toml")]
         config: PathBuf,
-        /// Использовать LLM для анализа файлов
+        /// Use the LLM
         #[arg(long, default_value_t = false)]
         llm: bool,
     },
 
-    /// Интерактивный TUI (дерево + heatmap)
+    /// Interactive TUI (tree + heatmap)
     Tui {
-        /// Корневая директория.
+        /// Root directory
         root: PathBuf,
     },
 
-    /// Сгенерировать отчёт (JSON)
+    /// Generate a report (JSON)
     Report {
-        /// Корневая директория.
+        /// Root directory
         root: PathBuf,
-        /// Куда записать отчёт (по умолчанию — report.json).
+        /// Where to write the report (default report.json)
         #[arg(short, long, default_value = "report.json")]
         output: Option<PathBuf>,
     },

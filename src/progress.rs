@@ -1,21 +1,19 @@
-//! Прогресс-бары через `indicatif` (Этап 1 MVP).
-//!
-//! Используется при обходе ФС и классификации, чтобы показывать live-прогресс.
+//! Progress bars via `indicatif`
 
 use indicatif::{ProgressBar, ProgressStyle};
 
-/// Создать прогресс-бар для сканирования ФС.
+/// Scan progress bar
 ///
-/// @todo: вернуть `ProgressBar` со стилем "сканирование: {wide_bar} {pos}/{len}".
+/// @todo style "scanning: {wide_bar} {pos}/{len}"
 pub fn scan_progress(_total: u64) -> ProgressBar {
     let _ = ProgressStyle::default_bar();
-    todo!("создать прогресс-бар сканирования")
+    todo!("create the scan progress bar")
 }
 
-/// Создать спиннер для классификации (количество файлов заранее неизвестно).
+/// Classification spinner (file count unknown up front)
 ///
-/// @todo: вернуть спиннер со стилем "{spinner} классификация: {pos} файлов".
+/// @todo style "{spinner} classifying: {pos} files"
 pub fn classify_spinner() -> ProgressBar {
     let _ = ProgressStyle::default_spinner();
-    todo!("создать спиннер классификации")
+    todo!("create the classification spinner")
 }

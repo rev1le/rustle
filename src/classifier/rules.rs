@@ -1,47 +1,37 @@
-//! L1: жёсткие правила — расширения и паттерны имён.
-//!
-//! "Система whitelist/blacklist расширений" и "Паттерны мусора
-//! (thumbs.db, .DS_Store, node_modules)" (Этап 2).
+//! L1: hard rules — extensions and name patterns
 
 use crate::classifier::ClassifierLayer;
 use crate::config::RulesConfig;
 use crate::models::{Classification, FileMeta};
 
-/// Скомпилированный набор правил L1.
-///
-/// Поля читаются после реализации `ClassifierLayer::classify` (Этап 2).
+/// Compiled L1 rules
 #[expect(
     dead_code,
-    reason = "заглушка: поля используются после реализации todo в classify"
+    reason = "stub: fields are used once the todo in classify is implemented"
 )]
 pub struct Rules {
-    /// Whitelist расширений → Keep.
+    /// Extensions → Keep
     keep_exts: Vec<String>,
-    /// Blacklist расширений → Trash.
+    /// Extensions → Trash
     trash_exts: Vec<String>,
-    /// Паттерны имён → Trash (например, "thumbs.db", ".DS_Store").
+    /// Name patterns → Trash (thumbs.db, .DS_Store)
     trash_patterns: Vec<String>,
 }
 
 impl Rules {
-    /// Собрать правила из TOML-конфига.
+    /// Build from TOML config
     ///
-    /// @todo: привести расширения к нижнему регистру и скомпилировать
-    /// паттерны в `glob::Pattern` (или `regex`) для быстрой проверки.
+    /// @todo lowercase exts, compile patterns to glob/regex for fast matching
     pub fn from_config(config: &RulesConfig) -> Self {
         let _ = config;
-        todo!("скомпилировать правила L1 из RulesConfig")
+        todo!("compile L1 rules from RulesConfig")
     }
 }
 
 impl ClassifierLayer for Rules {
     fn classify(&self, file: &FileMeta) -> Option<(Classification, String)> {
         let _ = file;
-        // @todo:
-        //   1. Если ext в keep_exts → Some((Keep, reason)).
-        //   2. Если ext в trash_exts → Some((Trash, reason)).
-        //   3. Если имя файла совпадает с trash_patterns → Some((Trash, reason)).
-        //   4. Иначе None (передать на L2).
-        todo!("применить жёсткие правила к {:?}", file.path)
+        // @todo keep_exts→Keep, trash_exts→Trash, pattern match→Trash, else None (→L2)
+        todo!("apply hard rules to {:?}", file.path)
     }
 }

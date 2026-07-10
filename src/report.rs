@@ -1,6 +1,4 @@
-//! Генерация отчётов (Этап 4): JSON.
-//!
-//! "Отчёты (HTML/JSON)" из дорожной карты — пока реализован только JSON.
+//! Report generation
 
 use std::path::Path;
 
@@ -10,10 +8,10 @@ use crate::error::RustleError;
 use crate::models::{FileMeta, Recommendation, human_readable_size};
 use crate::scanner::ScanResult;
 
-/// Сколько самых больших файлов включать в отчёт.
+/// Largest files to include in the report
 const TOP_FILES_LIMIT: usize = 20;
 
-/// Сводка по результатам сканирования для отчёта.
+/// Scan results summary for the report
 pub struct Report {
     pub scan: ScanResult,
     pub recommendations: Vec<Recommendation>,
@@ -27,28 +25,25 @@ impl Report {
         }
     }
 
-    /// Сгенерировать JSON-отчёт и записать по пути `output`
-    /// (или вывести в stdout, если `output` — None).
+    /// Render JSON to `output`, or stdout if None
     pub fn render(&self, output: Option<&Path>) -> Result<(), RustleError> {
         let json = self.render_json()?;
         match output {
             Some(path) => {
                 std::fs::write(path, json)?;
-                log::info!("отчёт записан в {}", path.display());
+                log::info!("report written to {}", path.display());
             }
             None => {
                 println!("{json}");
-                log::info!("отчёт выведен в stdout");
+                log::info!("report printed to stdout");
             }
         }
         Ok(())
     }
 
-    /// Сериализовать отчёт вpretty JSON.
+    /// Serialize to pretty JSON
     ///
-    /// Включает сводку (количество/размер), топ самых больших файлов и
-    /// рекомендации классификатора. Полный дамп всех файлов не выводится —
-    /// отчёт должен быть компактным дайджестом.
+    /// Compact digest: summary, top files, recommendations (no full file dump)
     fn render_json(&self) -> Result<String, RustleError> {
         use crate::scanner::aggregator::top_largest;
 
@@ -74,7 +69,7 @@ impl Report {
     }
 }
 
-/// Сериализуемое представление отчёта.
+/// Serializable report representation
 #[derive(Serialize)]
 struct JsonReport<'a> {
     summary: Summary,
@@ -90,7 +85,7 @@ struct Summary {
     total_size_human: String,
 }
 
-/// Запись о файле в отчёте.
+/// File entry in the report
 #[derive(Serialize)]
 struct JsonFileEntry {
     path: String,
@@ -157,7 +152,7 @@ mod tests {
             Vec::new(),
         );
         let json = report.render_json().unwrap();
-        // big.bin должен идти раньше small.txt (сортировка по убыванию).
+        // big.bin before small.txt (desc)
         let big_pos = json.find("big.bin").unwrap();
         let small_pos = json.find("small.txt").unwrap();
         assert!(big_pos < small_pos);
@@ -176,7 +171,7 @@ mod tests {
             },
             classification: Classification::Trash,
             source: ClassifierLevel::L1Rules,
-            reason: "совпадение с паттерном мусора".to_string(),
+            reason: "matches a trash pattern".to_string(),
         };
         let report = Report::new(empty_result(vec![]), vec![rec]);
         let json = report.render_json().unwrap();
@@ -188,7 +183,7 @@ mod tests {
 
     #[test]
     fn render_json_is_valid_json() {
-        // Сериализация должна давать валидный JSON (переспарсим его).
+        // must be valid JSON (re-parse it)
         let report = Report::new(empty_result(vec![file("/a", 10, None)]), Vec::new());
         let json = report.render_json().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();

@@ -1,31 +1,4 @@
-//! Кэш результатов классификации (Этап 3) на встроенной KV-БД `sled`.
-//!
-//! "Кэширование ответов по хэшу файла" и "Кэш ответов LLM для повторных
-//! запусков" — ключевые решения проекта.
-//!
-//! Кэш адресуется по содержимому файла: ключ — BLAKE3-хэш, значение —
-//! сериализованная [`Classification`]. Это позволяет переиспользовать
-//! (дорогие) ответы LLM для неизменных файлов при повторных запусках.
-//!
-//! Типичный сценарий использования:
-//! ```no_run
-//! use anyhow::Result;
-//! use rustle::cache::ClassificationCache;
-//! use rustle::models::Classification;
-//! use std::path::Path;
-//!
-//! fn classify_cached(path: &Path) -> Result<Classification> {
-//!     let cache = ClassificationCache::new()?;
-//!     let hash = ClassificationCache::hash_file(path)?;
-//!     if let Some(found) = cache.get(&hash)? {
-//!         return Ok(found);
-//!     }
-//!     let verdict = Classification::Trash; // здесь был бы вызов LLM
-//!     cache.put(&hash, verdict.clone())?;
-//!     Ok(verdict)
-//! }
-//! # fn main() {}
-//! ```
+//! Classification results cache (Stage 3) on the embedded KV-DB `sled`
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -35,30 +8,27 @@ use blake3::Hasher;
 use crate::error::RustleError;
 use crate::models::Classification;
 
-/// Размер буфера потокового чтения при хэшировании (64 КиБ).
+/// Streaming read buffer for hashing (64 KiB)
 const HASH_BUF_SIZE: usize = 64 * 1024;
 
-/// Хранилище кэша классификаций на `sled`, индексированное хэшем содержимого.
+/// Classification cache on `sled`, keyed by content hash
 pub struct ClassificationCache {
     db: sled::Db,
 }
 
 impl ClassificationCache {
-    /// Открыть кэш в явном каталоге (создаётся при необходимости).
+    /// Open at an explicit directory, created if missing
     pub fn open(path: &Path) -> Result<Self, RustleError> {
         let db = sled::open(path)?;
         Ok(Self { db })
     }
 
-    /// Открыть кэш в расположении по умолчанию: `<cache_dir>/rustle/classifications`,
-    /// где `cache_dir` — системный каталог кэша ОС. Если его определить не
-    /// удалось, используется локальный `.rustle-cache`.
+    /// Open at the OS cache dir, falling back to local `.rustle-cache`
     pub fn new() -> Result<Self, RustleError> {
         Self::open(&default_cache_path())
     }
 
-    /// Посчитать BLAKE3-хэш содержимого файла потоково (без загрузки всего
-    /// файла в память). Используется как ключ кэша и для поиска дубликатов.
+    /// Streaming BLAKE3 hash; used as the cache key and for duplicate detection
     pub fn hash_file(path: &Path) -> Result<[u8; 32], RustleError> {
         let mut file = std::fs::File::open(path)?;
         let mut hasher = Hasher::new();
@@ -73,7 +43,7 @@ impl ClassificationCache {
         Ok(*hasher.finalize().as_bytes())
     }
 
-    /// Найти закэшированную классификацию по хэшу файла.
+    /// Get a cached classification by hash
     pub fn get(&self, hash: &[u8; 32]) -> Result<Option<Classification>, RustleError> {
         let value = self.db.get(hash)?;
         value
@@ -81,34 +51,32 @@ impl ClassificationCache {
             .transpose()
     }
 
-    /// Сохранить классификацию в кэш по хэшу файла.
-    ///
-    /// Данные сбрасываются на диск асинхронно самим `sled`; для гарантированной
-    /// записи вызовите [`flush`](Self::flush).
+    /// Insert a classification. sled flushes async; call [`flush`](Self::flush)
+    /// for a durable write
     pub fn put(&self, hash: &[u8; 32], classification: Classification) -> Result<(), RustleError> {
         let bytes = serde_json::to_vec(&classification)?;
         self.db.insert(hash, bytes)?;
         Ok(())
     }
 
-    /// Гарантированно сбросить кэш на диск.
+    /// Force a durable flush to disk
     pub fn flush(&self) -> Result<(), RustleError> {
         self.db.flush()?;
         Ok(())
     }
 
-    /// Количество закэшированных записей.
+    /// Cached entry count
     pub fn len(&self) -> Result<usize, RustleError> {
         Ok(self.db.len())
     }
 
-    /// Пуст ли кэш.
+    /// Whether empty
     pub fn is_empty(&self) -> Result<bool, RustleError> {
         Ok(self.db.is_empty())
     }
 }
 
-/// Расположение кэша по умолчанию.
+/// Default cache location
 fn default_cache_path() -> PathBuf {
     dirs::cache_dir()
         .map(|d| d.join("rustle").join("classifications"))
@@ -199,7 +167,7 @@ mod tests {
             .put(&hash, Classification::Keep)
             .unwrap();
 
-        // Переоткрываем ту же БД — данные должны сохраниться.
+        // reopen the same DB — data must survive
         let reopened = ClassificationCache::open(dir.path()).unwrap();
         assert_eq!(reopened.get(&hash).unwrap(), Some(Classification::Keep));
     }
