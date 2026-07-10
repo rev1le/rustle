@@ -3,7 +3,14 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
-#[command(name = "rustle", version, about)]
+#[command(
+    name = "rustle",
+    version,
+    about,
+    disable_help_subcommand = true,
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
 pub struct Cli {
     /// Уровень логирования.
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
@@ -26,13 +33,13 @@ pub enum Command {
         llm: bool,
     },
 
-    /// Этап 4: интерактивный TUI (дерево + heatmap).
+    /// Интерактивный TUI (дерево + heatmap)
     Tui {
         /// Корневая директория.
         root: PathBuf,
     },
 
-    /// Этап 4: сгенерировать отчёт (JSON).
+    /// Сгенерировать отчёт (JSON)
     Report {
         /// Корневая директория.
         root: PathBuf,

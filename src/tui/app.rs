@@ -1,265 +1,163 @@
-//! Состояние приложения: агрегированные данные сканирования и навигация.
+//! Состояние приложения: карта экранов и диспетчеризация ввода/отрисовки.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
-use ratatui::widgets::ListState;
+use crossterm::event::KeyEvent;
+use ratatui::Frame;
 
-use crate::models::{DirAggregate, FileMeta};
+use super::views::{Action, FileDetailScreen, MainScreen, Screen, View};
+use crate::models::FileMeta;
 use crate::scanner::ScanResult;
 
-/// Сколько каталогов показывать в основной панели.
-pub(super) const MAX_DIRS: usize = 50;
-/// Сколько файлов показывать в боковой панели.
-pub(super) const MAX_FILES: usize = 30;
-
+/// Период опроса ввода / тика анимации.
 pub(super) const TICK_MS: u64 = 200;
-pub(super) const MARQUEE_PAUSE_TICKS: usize = 4;
-/// Сколько тиков живёт временное статусное сообщение в футере.
-pub(super) const STATUS_TTL_TICKS: usize = 20;
 
-/// Какая из двух панелей сейчас принимает ввод.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Focus {
-    Directories,
-    Files,
-}
-
-/// Какой экран TUI сейчас активен.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum View {
-    /// Основной: две панели + сводка.
-    Main,
-    /// Детали выбранного файла.
-    FileDetail,
-}
-
-/// Состояние TUI: агрегированные данные сканирования + навигация.
+/// Корневое состояние TUI: карта экранов и активный экран.
 pub(super) struct App {
-    pub(super) root: PathBuf,
-    pub(super) total_files: usize,
-    pub(super) skipped: usize,
-    pub(super) total_size: u64,
-    pub(super) directories: Vec<DirAggregate>,
-    pub(super) top_files: Vec<FileMeta>,
-    pub(super) focus: Focus,
-    /// Фаза анимации бегущей строки для выделенной строки активной панели.
-    /// Сбрасывается в 0 при любой смене выделения/фокуса, нарастает каждый тик.
-    pub(super) scroll_phase: usize,
-    /// Временное статусное сообщение (например, результат открытия файла).
-    pub(super) status: Option<String>,
-    /// Сколько тиков осталось показывать `status`, прежде чем он исчезнет.
-    pub(super) status_ttl: usize,
-    /// Текущий экран.
-    pub(super) view: View,
-    /// Файл, чьи детали показываются в [`View::FileDetail`].
-    pub(super) detail_file: Option<FileMeta>,
+    /// Активный экран — ключ в `views`.
+    pub(super) active: View,
+    /// Сохранённые состояния всех посещённых экранов.
+    /// При переключении значения не удаляются — данные прошлого экрана
+    /// сохраняются и восстанавливаются при возврате.
+    views: HashMap<View, Box<dyn Screen>>,
 }
 
 impl App {
     pub(super) fn new(root: PathBuf, scan: ScanResult) -> Self {
-        let total_size: u64 = scan.files.iter().map(|f| f.size).sum();
-        let total_files = scan.files.len();
-        let skipped = scan.skipped;
-
-        // Только подкаталоги внутри корня — отсекаем сам корень и родителей.
-        let mut directories = crate::scanner::aggregator::aggregate(&scan.files);
-        directories.retain(|d| d.path != root && d.path.starts_with(&root));
-        directories.truncate(MAX_DIRS);
-
-        let top_files = crate::scanner::aggregator::top_largest(&scan.files, MAX_FILES);
-
+        let mut views: HashMap<View, Box<dyn Screen>> = HashMap::new();
+        views.insert(View::Main, Box::new(MainScreen::new(root, scan)));
         Self {
-            root,
-            total_files,
-            skipped,
-            total_size,
-            directories,
-            top_files,
-            focus: Focus::Directories,
-            scroll_phase: 0,
-            status: None,
-            status_ttl: 0,
-            view: View::Main,
-            detail_file: None,
+            active: View::Main,
+            views,
         }
     }
 
-    /// Сдвинуть выделение в списке каталогов, ограничив границы.
-    /// Смена выделения сбрасывает фазу анимации бегущей строки.
-    pub(super) fn move_directory_selection(&mut self, state: &mut ListState, delta: isize) {
-        move_stateful_selection(state, self.directories.len(), delta);
-        self.scroll_phase = 0;
+    /// Активный экран (мутабельно).
+    fn screen_mut(&mut self) -> &mut dyn Screen {
+        self.views
+            .get_mut(&self.active)
+            .expect("активный экран всегда присутствует в карте")
+            .as_mut()
     }
 
-    /// Сдвинуть выделение в списке файлов, ограничив границы.
-    /// Смена выделения сбрасывает фазу анимации бегущей строки.
-    pub(super) fn move_file_selection(&mut self, state: &mut ListState, delta: isize) {
-        move_stateful_selection(state, self.top_files.len(), delta);
-        self.scroll_phase = 0;
+    /// Отрисовать активный экран.
+    pub(super) fn draw_active(&mut self, frame: &mut Frame) {
+        self.screen_mut().draw(frame);
     }
 
-    /// Переключить фокус между панелями.
-    ///
-    /// `direction > 0` — вправо (каталоги → файлы), `< 0` — влево.
-    /// На краях переход игнорируется. Смена фокуса сбрасывает анимацию.
-    pub(super) fn switch_focus(&mut self, direction: isize) {
-        self.focus = match (self.focus, direction) {
-            (Focus::Directories, 1) => Focus::Files,
-            (Focus::Files, -1) => Focus::Directories,
-            (current, _) => current,
-        };
-        self.scroll_phase = 0;
-    }
-
-    /// Продвинуть анимацию бегущей строки на один шаг (вызывается по таймеру).
+    /// Продвинуть таймеры/анимацию активного экрана на один шаг.
     pub(super) fn tick(&mut self) {
-        self.scroll_phase = self.scroll_phase.wrapping_add(1);
-        // Гасим статусное сообщение по истечении TTL.
-        if self.status_ttl > 0 {
-            self.status_ttl -= 1;
-            if self.status_ttl == 0 {
-                self.status = None;
+        self.screen_mut().tick();
+    }
+
+    /// Обработать нажатие клавиши активным экраном.
+    ///
+    /// Возвращает `Action::Quit`, если приложение должно завершиться; переходы
+    /// между экранами (`OpenDetail`, `Back`) выполняются здесь же, над картой.
+    pub(super) fn handle_key(&mut self, key: KeyEvent) -> Action {
+        // Запрос экрана — владеемое значение, поэтому заимновение карты здесь
+        // заканчивается до того, как `apply` потребует мутабельный доступ.
+        let action = self.screen_mut().handle_key(key);
+        self.apply(action)
+    }
+
+    /// Применить запрос экрана к карте: переходы гасятся в `None`, выход
+    /// прокидывается наверх к циклу ввода.
+    fn apply(&mut self, action: Action) -> Action {
+        match action {
+            Action::OpenDetail(file) => {
+                self.open_detail(file);
+                Action::None
             }
+            Action::Back => {
+                self.active = View::Main;
+                Action::None
+            }
+            other => other,
         }
     }
 
-    /// Показать временное статусное сообщение в футере.
-    pub(super) fn set_status(&mut self, message: impl Into<String>) {
-        self.status = Some(message.into());
-        self.status_ttl = STATUS_TTL_TICKS;
+    /// Открыть экран деталей файла, замещая прежнее состояние деталей.
+    /// Состояние основного экрана сохраняется в карте.
+    fn open_detail(&mut self, file: FileMeta) {
+        self.views
+            .insert(View::FileDetail, Box::new(FileDetailScreen::new(file)));
+        self.active = View::FileDetail;
     }
-
-    /// Открыть экран деталей файла.
-    pub(super) fn open_detail(&mut self, file: FileMeta) {
-        self.detail_file = Some(file);
-        self.view = View::FileDetail;
-    }
-
-    /// Закрыть экран деталей и вернуться к основному виду.
-    pub(super) fn close_detail(&mut self) {
-        self.view = View::Main;
-        self.detail_file = None;
-    }
-}
-
-/// Общий helper сдвига выделения в `ListState` для списка длины `len`.
-fn move_stateful_selection(state: &mut ListState, len: usize, delta: isize) {
-    if len == 0 {
-        return;
-    }
-    let current = state.selected().unwrap_or(0);
-    let next = (current as isize + delta).clamp(0, (len - 1) as isize) as usize;
-    state.select(Some(next));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tui::test_fixtures::{file, scan_of};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    #[test]
-    fn move_directory_selection_clamps_to_bounds() {
-        let mut app = App::new(
-            PathBuf::from("/root"),
-            scan_of(vec![
-                file("/root/sub1/x", 1, None),
-                file("/root/sub2/y", 2, None),
-            ]),
-        );
-        // После агрегации остаются два подкаталога (сам /root отсечён).
-        assert_eq!(app.directories.len(), 2);
-
-        let mut state = ListState::default();
-        state.select(Some(0));
-
-        app.move_directory_selection(&mut state, 100);
-        assert_eq!(state.selected(), Some(1));
-
-        app.move_directory_selection(&mut state, -100);
-        assert_eq!(state.selected(), Some(0));
+    /// Послать в приложение «нажатие» символьной клавиши без модификаторов.
+    fn press(ch: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)
     }
 
     #[test]
-    fn move_file_selection_clamps_to_bounds() {
-        let mut app = App::new(
+    fn active_starts_on_main() {
+        let app = App::new(
             PathBuf::from("/root"),
-            scan_of(vec![
-                file("/root/a", 1, None),
-                file("/root/b", 2, None),
-                file("/root/c", 3, None),
-            ]),
+            scan_of(vec![file("/root/a", 1, None)]),
         );
-        assert_eq!(app.top_files.len(), 3);
-
-        let mut state = ListState::default();
-        state.select(Some(0));
-
-        app.move_file_selection(&mut state, 100);
-        assert_eq!(state.selected(), Some(2));
-
-        app.move_file_selection(&mut state, -100);
-        assert_eq!(state.selected(), Some(0));
+        assert_eq!(app.active, View::Main);
     }
 
     #[test]
-    fn move_directory_selection_is_noop_without_directories() {
+    fn enter_on_files_opens_detail() {
+        let mut app = App::new(
+            PathBuf::from("/root"),
+            scan_of(vec![file("/root/a.bin", 42, Some("bin"))]),
+        );
+
+        // Переключаемся на панель файлов и открываем детали первого файла.
+        app.handle_key(press('l'));
+        let action = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.active, View::FileDetail);
+        // Переход обработан на уровне App — наружу возвращается None.
+        assert!(matches!(action, Action::None));
+    }
+
+    #[test]
+    fn esc_from_detail_returns_to_main() {
+        let mut app = App::new(
+            PathBuf::from("/root"),
+            scan_of(vec![file("/root/a.bin", 42, Some("bin"))]),
+        );
+        app.handle_key(press('l'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.active, View::FileDetail);
+
+        // Esc на экране деталей → назад.
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.active, View::Main);
+    }
+
+    #[test]
+    fn q_from_main_requests_quit() {
         let mut app = App::new(
             PathBuf::from("/root"),
             scan_of(vec![file("/root/a", 1, None)]),
         );
-        assert!(app.directories.is_empty());
-
-        let mut state = ListState::default();
-        state.select(Some(0));
-        app.move_directory_selection(&mut state, 5);
-        assert_eq!(state.selected(), Some(0));
+        assert!(matches!(app.handle_key(press('q')), Action::Quit));
     }
 
     #[test]
-    fn switch_focus_toggles_between_panels() {
-        let mut app = App::new(
-            PathBuf::from("/root"),
-            scan_of(vec![
-                file("/root/sub/a", 1, None),
-                file("/root/sub2/b", 2, None),
-            ]),
-        );
-
-        // По умолчанию активна панель каталогов.
-        assert_eq!(app.focus, Focus::Directories);
-
-        // Влево из каталогов — ничего не делаем (уже на левом краю).
-        app.switch_focus(-1);
-        assert_eq!(app.focus, Focus::Directories);
-
-        // Вправо → файлы.
-        app.switch_focus(1);
-        assert_eq!(app.focus, Focus::Files);
-
-        // Вправо из файлов — ничего не делаем (уже на правом краю).
-        app.switch_focus(1);
-        assert_eq!(app.focus, Focus::Files);
-
-        // Влево → обратно в каталоги.
-        app.switch_focus(-1);
-        assert_eq!(app.focus, Focus::Directories);
-    }
-
-    #[test]
-    fn tick_advances_scroll_phase() {
+    fn ctrl_c_from_main_requests_quit() {
         let mut app = App::new(
             PathBuf::from("/root"),
             scan_of(vec![file("/root/a", 1, None)]),
         );
-        assert_eq!(app.scroll_phase, 0);
-
-        app.tick();
-        app.tick();
-        assert_eq!(app.scroll_phase, 2);
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(matches!(app.handle_key(ctrl_c), Action::Quit));
     }
 
     #[test]
-    fn navigation_resets_scroll_phase() {
+    fn roundtrip_to_detail_and_back_keeps_app_working() {
         let mut app = App::new(
             PathBuf::from("/root"),
             scan_of(vec![
@@ -267,83 +165,17 @@ mod tests {
                 file("/root/sub2/b", 2, None),
             ]),
         );
-        // «накрутим» фазу анимации
-        app.tick();
-        app.tick();
-        app.tick();
-        assert_eq!(app.scroll_phase, 3);
 
-        // Смена выделения в каталогах сбрасывает фазу.
-        let mut state = ListState::default();
-        state.select(Some(0));
-        app.move_directory_selection(&mut state, 1);
-        assert_eq!(app.scroll_phase, 0);
+        // Основной экран продолжает отвечать после возврата из деталей:
+        // состояние основного экрана не удалялось из карты.
+        app.handle_key(press('l'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.active, View::FileDetail);
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.active, View::Main);
 
-        // Переключение фокуса тоже сбрасывает.
-        app.tick();
-        assert_eq!(app.scroll_phase, 1);
-        app.switch_focus(1);
-        assert_eq!(app.scroll_phase, 0);
-    }
-
-    #[test]
-    fn set_status_shows_message_with_ttl() {
-        let mut app = App::new(
-            PathBuf::from("/root"),
-            scan_of(vec![file("/root/a", 1, None)]),
-        );
-        assert!(app.status.is_none());
-
-        app.set_status("готово");
-        assert_eq!(app.status.as_deref(), Some("готово"));
-        assert_eq!(app.status_ttl, STATUS_TTL_TICKS);
-    }
-
-    #[test]
-    fn status_expires_after_ttl_ticks() {
-        let mut app = App::new(
-            PathBuf::from("/root"),
-            scan_of(vec![file("/root/a", 1, None)]),
-        );
-        app.set_status("временное");
-
-        // Прожить все тики, кроме последнего — сообщение ещё видно.
-        for _ in 0..STATUS_TTL_TICKS - 1 {
-            app.tick();
-            assert!(app.status.is_some(), "статус ещё должен показываться");
-        }
-        // Последний тик гасит сообщение.
-        app.tick();
-        assert!(app.status.is_none());
-        assert_eq!(app.status_ttl, 0);
-    }
-
-    #[test]
-    fn open_detail_switches_view_and_stores_file() {
-        let mut app = App::new(
-            PathBuf::from("/root"),
-            scan_of(vec![file("/root/a.bin", 42, Some("bin"))]),
-        );
-        assert_eq!(app.view, View::Main);
-        assert!(app.detail_file.is_none());
-
-        let meta = app.top_files[0].clone();
-        app.open_detail(meta.clone());
-        assert_eq!(app.view, View::FileDetail);
-        assert_eq!(app.detail_file.as_ref().map(|f| f.size), Some(42));
-    }
-
-    #[test]
-    fn close_detail_returns_to_main() {
-        let mut app = App::new(
-            PathBuf::from("/root"),
-            scan_of(vec![file("/root/a.bin", 42, Some("bin"))]),
-        );
-        app.open_detail(app.top_files[0].clone());
-        assert_eq!(app.view, View::FileDetail);
-
-        app.close_detail();
-        assert_eq!(app.view, View::Main);
-        assert!(app.detail_file.is_none());
+        // Повторный переход работает — основной экран «жив».
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.active, View::FileDetail);
     }
 }

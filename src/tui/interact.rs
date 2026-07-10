@@ -1,22 +1,23 @@
 //! Интерактивный цикл TUI: захват терминала, обработка ввода.
+//!
+//! Цикл максимально тонкий: отрисовку, ввод и таймеры делегирует активному
+//! экрану через `App`; сам разбирается лишь с выходом (`Action::Quit`).
 
 use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::widgets::ListState;
 
-use super::app::{App, Focus, TICK_MS, View};
-use super::draw;
+use super::app::{App, TICK_MS};
+use super::views::Action;
 use crate::error::RustleError;
-use crate::platform;
 use crate::scanner::ScanResult;
 
 /// RAII-обёртка над терминалом: захватывает raw-mode + альт. экран при
@@ -50,18 +51,11 @@ pub fn run(root: PathBuf, scan: ScanResult) -> Result<(), RustleError> {
     let mut app = App::new(root, scan);
     let mut guard = TerminalGuard::new()?;
 
-    let mut dir_state = ListState::default();
-    let mut file_state = ListState::default();
-    dir_state.select(Some(0));
-    file_state.select(Some(0));
-
     loop {
-        guard
-            .terminal
-            .draw(|frame| draw::draw(&app, frame, &mut dir_state, &mut file_state))?;
+        guard.terminal.draw(|frame| app.draw_active(frame))?;
 
         // Ждём событие не дольше TICK_MS: если ничего не нажато — продвигаем
-        // анимацию бегущей строки и перерисовываемся.
+        // анимацию активного экрана и перерисовываемся.
         if event::poll(Duration::from_millis(TICK_MS))? {
             let Event::Key(key) = event::read()? else {
                 continue;
@@ -70,78 +64,12 @@ pub fn run(root: PathBuf, scan: ScanResult) -> Result<(), RustleError> {
                 continue;
             }
 
-            if app.view == View::FileDetail {
-                match key.code {
-                    KeyCode::Esc | KeyCode::Backspace => app.close_detail(),
-                    _ => {}
-                }
-                continue;
-            }
-
-            match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    return Ok(());
-                }
-                // Горизонтальная навигация: переключаем активную панель.
-                KeyCode::Right | KeyCode::Char('l') => app.switch_focus(1),
-                KeyCode::Left | KeyCode::Char('h') => app.switch_focus(-1),
-                // Вертикальная навигация действует на активную панель.
-                KeyCode::Down | KeyCode::Char('j') => match app.focus {
-                    Focus::Directories => app.move_directory_selection(&mut dir_state, 1),
-                    Focus::Files => app.move_file_selection(&mut file_state, 1),
-                },
-                KeyCode::Up | KeyCode::Char('k') => match app.focus {
-                    Focus::Directories => app.move_directory_selection(&mut dir_state, -1),
-                    Focus::Files => app.move_file_selection(&mut file_state, -1),
-                },
-                KeyCode::Enter => {
-                    if app.focus == Focus::Files
-                        && let Some(idx) = file_state.selected()
-                        && let Some(file) = app.top_files.get(idx).cloned()
-                    {
-                        app.open_detail(file);
-                    }
-                }
-                // Открыть выделенный путь в проводнике ОС.
-                KeyCode::Char('g') => {
-                    if let Some(path) = focused_selected_path(&app, &dir_state, &file_state) {
-                        match platform::open_in_explorer(&path) {
-                            Ok(()) => app.set_status(format!("Открываю: {}", path.display())),
-                            Err(e) => app.set_status(format!("Ошибка: {e}")),
-                        }
-                    }
-                }
-                // Скопировать путь выделенного элемента в буфер обмена.
-                KeyCode::Char('y') => {
-                    if let Some(path) = focused_selected_path(&app, &dir_state, &file_state) {
-                        match platform::copy_to_clipboard(&path.to_string_lossy()) {
-                            Ok(()) => app.set_status(format!("Скопировано: {}", path.display())),
-                            Err(e) => app.set_status(format!("Ошибка: {e}")),
-                        }
-                    }
-                }
-                _ => {}
+            if let Action::Quit = app.handle_key(key) {
+                return Ok(());
             }
         } else {
-            // Тик таймера — анимация бегущей строки.
+            // Тик таймера — анимация бегущей строки/статусы.
             app.tick();
         }
-    }
-}
-
-/// Путь выделенного элемента в активной панели (если есть).
-fn focused_selected_path(
-    app: &App,
-    dir_state: &ListState,
-    file_state: &ListState,
-) -> Option<PathBuf> {
-    match app.focus {
-        Focus::Files => file_state
-            .selected()
-            .and_then(|i| app.top_files.get(i).map(|f| f.path.clone())),
-        Focus::Directories => dir_state
-            .selected()
-            .and_then(|i| app.directories.get(i).map(|d| d.path.clone())),
     }
 }
