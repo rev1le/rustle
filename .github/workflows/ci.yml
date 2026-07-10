@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main, dev]
+    tags:
+      - "v*"
   workflow_dispatch:
 
 env:
@@ -44,3 +46,89 @@ jobs:
 
       - name: Test (all features)
         run: cargo test --all-targets --all-features --verbose
+
+  release:
+    name: Release (${{ matrix.target }})
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          name="rustle-$VERSION-$TARGET"
+          mkdir -p "$name" dist
+          cp "target/$TARGET/release/rustle" "$name/"
+          tar -czf "dist/$name.tar.gz" -C "$name" rustle
+
+      - name: Package (windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          $name = "rustle-$env:VERSION-$env:TARGET"
+          New-Item -ItemType Directory -Force "$name", "dist" | Out-Null
+          Copy-Item "target/$env:TARGET/release/rustle.exe" "$name/"
+          Compress-Archive -Path "$name/rustle.exe" -DestinationPath "dist/$name.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustle-${{ matrix.target }}
+          path: dist/*
+
+  publish:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
