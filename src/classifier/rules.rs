@@ -19,12 +19,24 @@ pub struct Rules {
 }
 
 impl Rules {
-    /// Build from TOML config
+    /// Build from TOML config.
     ///
-    /// @todo lowercase exts, compile patterns to glob/regex for fast matching
+    /// Extensions are lowercased for case-insensitive matching; patterns are
+    /// stored verbatim (matched as simple `*` globs by the heuristic layer).
     pub fn from_config(config: &RulesConfig) -> Self {
-        let _ = config;
-        todo!("compile L1 rules from RulesConfig")
+        Self {
+            keep_exts: config
+                .keep_exts
+                .iter()
+                .map(|s| s.to_ascii_lowercase())
+                .collect(),
+            trash_exts: config
+                .trash_exts
+                .iter()
+                .map(|s| s.to_ascii_lowercase())
+                .collect(),
+            trash_patterns: config.trash_patterns.clone(),
+        }
     }
 }
 

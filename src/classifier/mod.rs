@@ -23,7 +23,7 @@ impl Classifier {
     pub fn new(config: &RulesConfig, llm: Option<LlmClient>, cache: ClassificationCache) -> Self {
         Self {
             rules: Rules::from_config(config),
-            heuristics: Heuristics::from_config(config),
+            heuristics: Heuristics::new(config.clone()),
             llm,
             cache,
         }
@@ -39,6 +39,33 @@ impl Classifier {
     pub fn classify(&self, file: &FileMeta) -> Recommendation {
         let _ = (&self.rules, &self.heuristics, &self.llm, &self.cache);
         todo!("classify {:?}", file.path)
+    }
+
+    /// L2 verdict for a file, always returning a concrete classification.
+    ///
+    /// Confident results come back as `Keep`/`Trash`; the uncertain band is
+    /// reported as `Uncertain(score)` so a caller can show a decision before
+    /// the LLM has run.
+    pub fn classify_l2(&self, file: &FileMeta) -> (Classification, String) {
+        if let Some(verdict) = self.heuristics.classify(file) {
+            return verdict;
+        }
+        let score = self.heuristics.score(file);
+        (
+            Classification::Uncertain(score),
+            format!("L2 heuristics: uncertain (score {score:.2})"),
+        )
+    }
+
+    /// L3 LLM verdict for a file. Returns `None` when no LLM is configured or
+    /// it declines (e.g. the local model is unreachable).
+    pub fn classify_llm(&self, file: &FileMeta) -> Option<(Classification, String)> {
+        self.llm.as_ref()?.classify(file)
+    }
+
+    /// Configured LLM model name, for display. `None` when no LLM is set up.
+    pub fn llm_model_name(&self) -> Option<&str> {
+        self.llm.as_ref().map(LlmClient::model_name)
     }
 }
 

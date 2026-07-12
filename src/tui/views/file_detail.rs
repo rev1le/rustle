@@ -1,5 +1,6 @@
-//! File detail screen: shows all `FileMeta` fields + LLM classification
+//! File detail screen: shows `FileMeta` + L2 heuristics, L3 LLM on demand
 
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
@@ -11,7 +12,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::{Action, Screen};
-use crate::classifier::llm::LlmClient;
+use crate::classifier::Classifier;
 use crate::models::{Classification, FileMeta, human_readable_size};
 
 /// Braille spinner frames for the "analyzing" state.
@@ -20,22 +21,27 @@ const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 /// Async LLM classification status, updated from a background thread.
 #[derive(Debug, Clone, PartialEq)]
 enum LlmStatus {
-    /// Not run (no LLM configured).
+    /// No LLM configured.
     Disabled,
+    /// LLM available, but not requested yet (press `k`).
+    Idle,
     /// Request in flight.
     Loading,
     /// Model returned a verdict.
     Done(Classification),
-    /// Request failed (Ollama down, parse error, etc.).
+    /// Request failed (Ollama down, parse error, declined, etc.).
     Failed(String),
 }
 
 /// File detail state
 pub(in crate::tui) struct FileDetailScreen {
     file: FileMeta,
-    /// Local LLM client (kept for the model name display).
-    llm: Option<LlmClient>,
-    /// Async classification status.
+    /// Classifier used for both the L2 verdict and the on-demand L3 verdict.
+    classifier: Arc<Classifier>,
+    /// Heuristic verdict, computed once when the screen opens. Always concrete
+    /// (Uncertain carries its score) so a decision is visible before the LLM runs.
+    heuristics: (Classification, String),
+    /// On-demand LLM classification status.
     status: LlmStatus,
     /// Receiver for the background classification worker (cleared on done).
     rx: Option<Receiver<Result<Classification, String>>>,
@@ -44,33 +50,49 @@ pub(in crate::tui) struct FileDetailScreen {
 }
 
 impl FileDetailScreen {
-    pub(in crate::tui) fn new(file: FileMeta, llm: Option<LlmClient>) -> Self {
-        let mut screen = Self {
+    pub(in crate::tui) fn new(file: FileMeta, classifier: Arc<Classifier>) -> Self {
+        // L2 runs synchronously and is cheap — show it immediately.
+        let heuristics = classifier.classify_l2(&file);
+        let status = if classifier.llm_model_name().is_some() {
+            LlmStatus::Idle
+        } else {
+            LlmStatus::Disabled
+        };
+        Self {
             file,
-            llm: llm.clone(),
-            status: LlmStatus::Disabled,
+            classifier,
+            heuristics,
+            status,
             rx: None,
             spin: 0,
-        };
-        if let Some(client) = llm {
-            screen.start_classification(client);
         }
-        screen
     }
 
-    /// Spawn a background thread that runs the LLM verdict for `self.file`.
+    /// Trigger LLM analysis on `k`, but only from a state where it makes sense.
+    fn maybe_start_llm(&mut self) {
+        match self.status {
+            LlmStatus::Idle | LlmStatus::Failed(_) => self.start_llm(),
+            // Disabled (no LLM), Loading (already running), Done (have a verdict).
+            _ => {}
+        }
+    }
+
+    /// Spawn a background thread that runs the L3 verdict for `self.file`.
     ///
     /// The blocking HTTP call would freeze the TUI, so it runs off the render
     /// loop and reports back through a channel polled on each tick.
-    fn start_classification(&mut self, client: LlmClient) {
+    fn start_llm(&mut self) {
         let (tx, rx) = mpsc::channel::<Result<Classification, String>>();
         self.rx = Some(rx);
         self.status = LlmStatus::Loading;
 
+        let classifier = self.classifier.clone();
         let file = self.file.clone();
         thread::spawn(move || {
-            let prompt = client.build_prompt(&file);
-            let result = client.ask(&prompt).map_err(|e| e.to_string());
+            let result = classifier
+                .classify_llm(&file)
+                .map(|(c, _)| c)
+                .ok_or_else(|| "LLM declined to classify this file".to_string());
             // best-effort send; if the screen was dropped, the receiver is gone
             let _ = tx.send(result);
         });
@@ -98,11 +120,46 @@ impl FileDetailScreen {
     }
 }
 
-/// Build the colored status line for the classification block.
-fn status_spans(status: &LlmStatus, spin: usize, model: &str) -> Vec<Span<'static>> {
+/// Colored verdict badge, reused by both the L2 and L3 lines.
+fn verdict_badge(c: &Classification) -> Span<'static> {
+    let (label, color) = match c {
+        Classification::Keep => ("KEEP", Color::Green),
+        Classification::Trash => ("TRASH", Color::Red),
+        Classification::Uncertain(_) => ("UNCERTAIN", Color::Yellow),
+    };
+    Span::styled(
+        format!("  {label}  "),
+        Style::default()
+            .fg(Color::Black)
+            .bg(color)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+/// One-line description of an LLM verdict.
+fn llm_detail(c: &Classification) -> String {
+    match c {
+        Classification::Keep => "the model suggests keeping it".into(),
+        Classification::Trash => "safe to delete".into(),
+        Classification::Uncertain(s) => format!("model is unsure (confidence {s:.2})"),
+    }
+}
+
+/// Spans for the L2 heuristics line (always shown, always a concrete verdict).
+fn heuristics_spans(verdict: &(Classification, String)) -> Vec<Span<'static>> {
+    let (class, reason) = verdict;
+    vec![verdict_badge(class), Span::raw(format!(" {reason}"))]
+}
+
+/// Spans for the L3 LLM line (status-driven).
+fn llm_spans(status: &LlmStatus, spin: usize, model: &str) -> Vec<Span<'static>> {
     match status {
         LlmStatus::Disabled => vec![Span::styled(
-            format!(" LLM disabled (rebuild with --features llm) · model={model}"),
+            " L3 LLM: disabled (no model configured)",
+            Style::default().fg(Color::DarkGray),
+        )],
+        LlmStatus::Idle => vec![Span::styled(
+            format!(" L3 LLM: press 'k' to analyze with {model}"),
             Style::default().fg(Color::DarkGray),
         )],
         LlmStatus::Loading => vec![
@@ -110,17 +167,18 @@ fn status_spans(status: &LlmStatus, spin: usize, model: &str) -> Vec<Span<'stati
                 format!(" {} ", SPINNER[spin]),
                 Style::default().fg(Color::Yellow),
             ),
-            Span::raw(format!(
-                "Analyzing with {model}… (CPU inference can take a while)"
-            )),
+            Span::raw(format!(" L3 LLM: analyzing with {model}…")),
         ],
-        LlmStatus::Done(c) => verdict_spans(c),
+        LlmStatus::Done(c) => vec![
+            verdict_badge(c),
+            Span::raw(format!(" L3 LLM: {}", llm_detail(c))),
+        ],
         LlmStatus::Failed(msg) => {
             let first_line = msg.lines().next().unwrap_or("unknown error");
             vec![
                 Span::styled(" ⚠ ", Style::default().fg(Color::LightRed)),
                 Span::styled(
-                    "LLM unavailable: ".to_string(),
+                    " L3 LLM unavailable: ",
                     Style::default().fg(Color::LightRed),
                 ),
                 Span::styled(first_line.to_string(), Style::default().fg(Color::Gray)),
@@ -129,35 +187,15 @@ fn status_spans(status: &LlmStatus, spin: usize, model: &str) -> Vec<Span<'stati
     }
 }
 
-/// Colored spans for a concrete verdict.
-fn verdict_spans(c: &Classification) -> Vec<Span<'static>> {
-    let score_note = match c {
-        Classification::Uncertain(s) => format!(" (confidence {s:.2})"),
-        _ => String::new(),
-    };
-    let (label, color, detail) = match c {
-        Classification::Keep => ("KEEP", Color::Green, "the model suggests keeping it"),
-        Classification::Trash => ("TRASH", Color::Red, "safe to delete"),
-        Classification::Uncertain(_) => (
-            "UNCERTAIN",
-            Color::Yellow,
-            "model is unsure; review manually",
-        ),
-    };
-    vec![
-        Span::styled(
-            format!("  {label}  "),
-            Style::default()
-                .fg(Color::Black)
-                .bg(color)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(format!(" {detail}{score_note}")),
-    ]
-}
-
 /// Render the screen. Kept free of `&self` so it borrows nothing while drawing.
-fn render_detail(file: &FileMeta, status: &LlmStatus, spin: usize, model: &str, frame: &mut Frame) {
+fn render_detail(
+    file: &FileMeta,
+    heuristics: &(Classification, String),
+    status: &LlmStatus,
+    spin: usize,
+    model: &str,
+    frame: &mut Frame,
+) {
     let [header, body, footer] = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(1),
@@ -181,7 +219,7 @@ fn render_detail(file: &FileMeta, status: &LlmStatus, spin: usize, model: &str, 
     );
 
     let [info_area, class_area] =
-        Layout::vertical([Constraint::Fill(1), Constraint::Length(3)]).areas(body);
+        Layout::vertical([Constraint::Fill(1), Constraint::Length(6)]).areas(body);
 
     let info_lines = vec![
         Line::raw(format!(" {:<13}{}", "Path:", file.path.display())),
@@ -211,17 +249,22 @@ fn render_detail(file: &FileMeta, status: &LlmStatus, spin: usize, model: &str, 
         info_area,
     );
 
-    // classification block
+    // classification block: L2 line first, L3 line below
     let class_title = format!(" Classification (LLM: {model}) ");
-    let class_line = Line::from(status_spans(status, spin, model));
+    let class_lines = vec![
+        Line::from(heuristics_spans(heuristics)),
+        Line::from(llm_spans(status, spin, model)),
+    ];
     frame.render_widget(
-        Paragraph::new(class_line).block(Block::default().borders(Borders::ALL).title(class_title)),
+        Paragraph::new(class_lines)
+            .block(Block::default().borders(Borders::ALL).title(class_title)),
         class_area,
     );
 
-    // footer: back hint
+    // footer: hints
     frame.render_widget(
-        Paragraph::new(" Esc/Backspace — back ").block(Block::default().borders(Borders::ALL)),
+        Paragraph::new(" k — LLM analyze · Esc/Backspace — back ")
+            .block(Block::default().borders(Borders::ALL)),
         footer,
     );
 }
@@ -229,12 +272,15 @@ fn render_detail(file: &FileMeta, status: &LlmStatus, spin: usize, model: &str, 
 impl Screen for FileDetailScreen {
     fn draw(&mut self, frame: &mut Frame) {
         self.poll_status();
-        let model = self
-            .llm
-            .as_ref()
-            .map(LlmClient::model_name)
-            .unwrap_or("(none)");
-        render_detail(&self.file, &self.status, self.spin, model, frame);
+        let model = self.classifier.llm_model_name().unwrap_or("(none)");
+        render_detail(
+            &self.file,
+            &self.heuristics,
+            &self.status,
+            self.spin,
+            model,
+            frame,
+        );
     }
 
     fn tick(&mut self) {
@@ -244,6 +290,10 @@ impl Screen for FileDetailScreen {
     fn handle_key(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Esc | KeyCode::Backspace => Action::Back,
+            KeyCode::Char('k') => {
+                self.maybe_start_llm();
+                Action::None
+            }
             _ => Action::None,
         }
     }
@@ -252,9 +302,11 @@ impl Screen for FileDetailScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::test_fixtures::classifier;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     fn sample_file() -> FileMeta {
         FileMeta {
@@ -267,7 +319,7 @@ mod tests {
 
     #[test]
     fn draw_renders_filemeta_fields_without_panic() {
-        let mut screen = FileDetailScreen::new(sample_file(), None);
+        let mut screen = FileDetailScreen::new(sample_file(), Arc::new(classifier()));
 
         let backend = TestBackend::new(90, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -283,15 +335,26 @@ mod tests {
         assert!(content.contains("Extension"), "extension row missing");
         assert!(
             content.contains("Classification"),
-            "classification block must render even without an LLM"
+            "classification block must render"
         );
+        assert!(content.contains("L2 heuristics"), "L2 line missing");
+    }
+
+    #[test]
+    fn heuristics_verdict_is_available_on_open() {
+        // Fresh, small, clean-path file → L2 returns a confident Keep.
+        let screen = FileDetailScreen::new(sample_file(), Arc::new(classifier()));
+        let (class, _) = &screen.heuristics;
+        assert_eq!(*class, Classification::Keep);
+        // LLM not requested yet → Idle (no LLM configured in the fixture).
+        assert_eq!(screen.status, LlmStatus::Disabled);
     }
 
     #[test]
     fn esc_returns_back() {
         use crossterm::event::KeyModifiers;
 
-        let mut screen = FileDetailScreen::new(sample_file(), None);
+        let mut screen = FileDetailScreen::new(sample_file(), Arc::new(classifier()));
         assert!(matches!(
             screen.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
             Action::Back
@@ -306,7 +369,7 @@ mod tests {
     fn unknown_key_is_ignored() {
         use crossterm::event::KeyModifiers;
 
-        let mut screen = FileDetailScreen::new(sample_file(), None);
+        let mut screen = FileDetailScreen::new(sample_file(), Arc::new(classifier()));
         assert!(matches!(
             screen.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
             Action::None
@@ -314,18 +377,46 @@ mod tests {
     }
 
     #[test]
-    fn status_spans_keep_is_green() {
-        let spans = status_spans(&LlmStatus::Done(Classification::Keep), 0, "qwen2.5:3b");
+    fn k_is_accepted_and_does_nothing_without_llm() {
+        use crossterm::event::KeyModifiers;
+
+        let mut screen = FileDetailScreen::new(sample_file(), Arc::new(classifier()));
+        // No LLM configured → k must not crash and stays Disabled.
+        assert!(matches!(
+            screen.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE)),
+            Action::None
+        ));
+        assert_eq!(screen.status, LlmStatus::Disabled);
+    }
+
+    #[test]
+    fn heuristics_spans_shows_verdict_badge() {
+        let spans = heuristics_spans(&(Classification::Keep, "L2 heuristics: keep".into()));
         assert!(spans.iter().any(|s| s.content.contains("KEEP")));
     }
 
     #[test]
-    fn status_spans_loading_shows_model() {
-        let spans = status_spans(&LlmStatus::Loading, 0, "qwen2.5:3b");
+    fn heuristics_spans_uncertain_shows_score_badge() {
+        let spans = heuristics_spans(&(
+            Classification::Uncertain(0.45),
+            "L2 heuristics: uncertain (score 0.45)".into(),
+        ));
+        assert!(spans.iter().any(|s| s.content.contains("UNCERTAIN")));
+    }
+
+    #[test]
+    fn llm_spans_idle_mentions_model() {
+        let spans = llm_spans(&LlmStatus::Idle, 0, "qwen2.5:3b");
         let joined: String = spans.iter().map(|s| s.content.clone()).collect();
         assert!(
             joined.contains("qwen2.5:3b"),
-            "loading line must name the model"
+            "idle line must name the model"
         );
+    }
+
+    #[test]
+    fn llm_spans_done_shows_verdict() {
+        let spans = llm_spans(&LlmStatus::Done(Classification::Trash), 0, "qwen2.5:3b");
+        assert!(spans.iter().any(|s| s.content.contains("TRASH")));
     }
 }

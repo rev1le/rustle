@@ -14,7 +14,7 @@ use ratatui::backend::CrosstermBackend;
 
 use super::app::{App, TICK_MS};
 use super::views::Action;
-use crate::classifier::llm::LlmClient;
+use crate::classifier::Classifier;
 use crate::error::RustleError;
 use crate::scanner::ScanResult;
 
@@ -43,8 +43,8 @@ impl Drop for TerminalGuard {
 }
 
 /// Run the interactive TUI over scan results
-pub fn run(root: PathBuf, scan: ScanResult, llm: Option<LlmClient>) -> Result<(), RustleError> {
-    let mut app = App::new(root, scan, llm);
+pub fn run(root: PathBuf, scan: ScanResult, classifier: Classifier) -> Result<(), RustleError> {
+    let mut app = App::new(root, scan, classifier);
     let mut guard = TerminalGuard::new()?;
 
     loop {

@@ -1,12 +1,6 @@
-use std::ops::Sub;
-use std::path::PathBuf;
-
-use chrono::{DateTime, TimeDelta, Utc};
 use clap::Parser;
 
-use rustle::FileMeta;
-use rustle::classifier::ClassifierLayer;
-use rustle::cli::{self, Cli, Command};
+use rustle::cli::{Cli, Command};
 use rustle::config::ScannerConfig;
 use rustle::logger::init_logger;
 use rustle::scanner::{ScanOptions, scan};
@@ -37,7 +31,8 @@ fn run_classify(
 }
 
 fn run_tui(root: std::path::PathBuf) -> anyhow::Result<()> {
-    use rustle::classifier::llm::LlmClient;
+    use rustle::cache::ClassificationCache;
+    use rustle::classifier::{Classifier, llm::LlmClient};
     use rustle::config;
     use rustle::tui;
 
@@ -63,17 +58,10 @@ fn run_tui(root: std::path::PathBuf) -> anyhow::Result<()> {
         None
     };
 
-    // if let Some(client) = llm {
-    //     let fm = FileMeta {
-    //         path: "./test/test.log".into(),
-    //         size: 6_0000,
-    //         ext: Some("log".into()),
-    //         mtime: Utc::now() - TimeDelta::days(40),
-    //     };
-    //     dbg!(client.classify(&fm));
-    // }
+    let cache = ClassificationCache::new()?;
+    let classifier = Classifier::new(&config.rules, llm, cache);
 
-    tui::run(root, result, llm)?;
+    tui::run(root, result, classifier)?;
     Ok(())
 }
 

@@ -2,12 +2,13 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 
 use super::views::{Action, FileDetailScreen, MainScreen, Screen, View};
-use crate::classifier::llm::LlmClient;
+use crate::classifier::Classifier;
 use crate::models::FileMeta;
 use crate::scanner::ScanResult;
 
@@ -20,18 +21,18 @@ pub(super) struct App {
     pub(super) active: View,
     /// Visited screens are kept on switch so their state survives a return
     views: HashMap<View, Box<dyn Screen>>,
-    /// Optional local LLM client, passed into the FileDetail screen
-    llm: Option<LlmClient>,
+    /// Classifier shared with the FileDetail screen for L2 + L3 verdicts
+    classifier: Arc<Classifier>,
 }
 
 impl App {
-    pub(super) fn new(root: PathBuf, scan: ScanResult, llm: Option<LlmClient>) -> Self {
+    pub(super) fn new(root: PathBuf, scan: ScanResult, classifier: Classifier) -> Self {
         let mut views: HashMap<View, Box<dyn Screen>> = HashMap::new();
         views.insert(View::Main, Box::new(MainScreen::new(root, scan)));
         Self {
             active: View::Main,
             views,
-            llm,
+            classifier: Arc::new(classifier),
         }
     }
 
@@ -81,7 +82,7 @@ impl App {
     fn open_detail(&mut self, file: FileMeta) {
         self.views.insert(
             View::FileDetail,
-            Box::new(FileDetailScreen::new(file, self.llm.clone())),
+            Box::new(FileDetailScreen::new(file, self.classifier.clone())),
         );
         self.active = View::FileDetail;
     }
@@ -90,7 +91,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::test_fixtures::{file, scan_of};
+    use crate::tui::test_fixtures::{classifier, file, scan_of};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     /// Send a char key press with no modifiers
@@ -103,7 +104,7 @@ mod tests {
         let app = App::new(
             PathBuf::from("/root"),
             scan_of(vec![file("/root/a", 1, None)]),
-            None,
+            classifier(),
         );
         assert_eq!(app.active, View::Main);
     }
@@ -113,7 +114,7 @@ mod tests {
         let mut app = App::new(
             PathBuf::from("/root"),
             scan_of(vec![file("/root/a.bin", 42, Some("bin"))]),
-            None,
+            classifier(),
         );
 
         // switch to files panel, open first file's details
@@ -129,7 +130,7 @@ mod tests {
         let mut app = App::new(
             PathBuf::from("/root"),
             scan_of(vec![file("/root/a.bin", 42, Some("bin"))]),
-            None,
+            classifier(),
         );
         app.handle_key(press('l'));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -145,7 +146,7 @@ mod tests {
         let mut app = App::new(
             PathBuf::from("/root"),
             scan_of(vec![file("/root/a", 1, None)]),
-            None,
+            classifier(),
         );
         assert!(matches!(app.handle_key(press('q')), Action::Quit));
     }
@@ -155,7 +156,7 @@ mod tests {
         let mut app = App::new(
             PathBuf::from("/root"),
             scan_of(vec![file("/root/a", 1, None)]),
-            None,
+            classifier(),
         );
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert!(matches!(app.handle_key(ctrl_c), Action::Quit));
@@ -169,7 +170,7 @@ mod tests {
                 file("/root/sub1/a", 1, None),
                 file("/root/sub2/b", 2, None),
             ]),
-            None,
+            classifier(),
         );
 
         // main screen still responds after returning: its state was kept
