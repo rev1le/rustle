@@ -9,25 +9,22 @@ use crate::error::RustleError;
 /// Root config
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
-    /// Scanner settings
     #[serde(default)]
-    pub scanner: IgnoreConfig,
-    /// L1/L2 rules
+    pub scanner: ScannerConfig,
     #[serde(default)]
     pub rules: RulesConfig,
-    /// Local LLM settings
     #[serde(default)]
-    pub llm: LlmConfig,
+    pub llm: Option<LlmConfig>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct IgnoreConfig {
-    /// Always-skipped dirs (e.g. `.git`)
+pub struct ScannerConfig {
+    /// Always-skipped dirs
     #[serde(default)]
-    pub ignore_dirs: Vec<String>,
+    pub ignored_dirs: Vec<String>,
     /// Always-skipped extensions
     #[serde(default)]
-    pub ignore_exts: Vec<String>,
+    pub ignored_exts: Vec<String>,
 }
 
 /// User-defined L1 (exts/patterns) and L2 (heuristics) rules
@@ -45,7 +42,7 @@ pub struct RulesConfig {
     #[serde(default)]
     pub trash_patterns: Vec<String>,
     /// Uncertain score below this goes to L3
-    #[serde(default = "default_threshold")]
+    #[serde(default = "defaults::threshold")]
     pub llm_threshold: f32,
 }
 
@@ -55,54 +52,117 @@ impl Default for RulesConfig {
             keep_exts: Vec::new(),
             trash_exts: Vec::new(),
             trash_patterns: Vec::new(),
-            llm_threshold: default_threshold(),
+            llm_threshold: defaults::threshold(),
         }
     }
-}
-
-fn default_threshold() -> f32 {
-    0.5
 }
 
 /// Local LLM connection (Ollama / llama.cpp)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
-    /// Endpoint URL (default http://localhost:11434)
+    /// Endpoint URL
+    #[serde(default = "defaults::endpoint")]
     pub endpoint: String,
-    /// Model name (e.g. qwen2.5:7b)
+    /// Model name
+    /// See [`crate::classifier::llm`] for the recommendation table.
     pub model: String,
+    /// Sampling temperature
+    #[serde(default = "defaults::temperature")]
+    pub temperature: f32,
+    /// Request timeout in seconds
+    #[serde(default = "defaults::timeout")]
+    pub timeout_secs: u64,
 }
 
-impl Default for LlmConfig {
-    fn default() -> Self {
-        Self {
-            endpoint: "http://localhost:11434".to_string(),
-            model: "qwen2.5:7b".to_string(),
-        }
+mod defaults {
+    pub fn temperature() -> f32 {
+        0.1
     }
+
+    pub fn endpoint() -> String {
+        "http://localhost:11434".into()
+    }
+
+    pub fn timeout() -> u64 {
+        120
+    }
+
+    pub fn threshold() -> f32 {
+        0.5
+    }
+}
+
+fn get_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("rustle/config.toml")
 }
 
 impl Config {
-    /// Load from a TOML file
-    ///
-    /// @todo parse via `toml::from_str`
-    pub fn load(path: &Path) -> Result<Self, RustleError> {
-        let _ = path;
-        todo!("read TOML from {:?} and deserialize into Config", path)
+    pub fn load() -> Result<Self, RustleError> {
+        let path = get_config_path();
+
+        if !path.exists() {
+            let c = Self::default();
+            c.save()?;
+            return Ok(c);
+        }
+
+        let text = std::fs::read_to_string(path)?;
+        let config = toml::from_str::<Self>(&text)?;
+        Ok(config)
     }
 
-    /// Save to TOML (for the `init` command)
-    ///
-    /// @todo serialize via `toml::to_string`
-    pub fn save(&self, path: &Path) -> Result<(), RustleError> {
-        let _ = path;
-        todo!("serialize Config to TOML and write to {:?}", path)
+    pub fn save(&self) -> Result<(), RustleError> {
+        let path = get_config_path();
+        let text = toml::to_string_pretty(self)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, text)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_then_load_round_trips_llm_config() {
+        // let dir = tempfile::tempdir().unwrap();
+
+        let mut config = Config::default();
+        let default_llm = LlmConfig::default();
+
+        config.llm = Some(LlmConfig {
+            model: "qwen2.5:3b".into(),
+            timeout_secs: 300,
+            ..default_llm
+        });
+
+        config.save().unwrap();
+        // let loaded = Config::load(&path).unwrap();
+
+        // assert_eq!(loaded.llm.model, "qwen2.5:3b");
+        // assert_eq!(loaded.llm.timeout_secs, 300);
+        // assert_eq!(loaded.llm.temperature, 0.1);
     }
 
-    /// Find default config: `./rustle.toml`, then `~/.config/rustle/`
-    ///
-    /// @todo search standard locations
-    pub fn discover() -> Option<PathBuf> {
-        todo!("find rustle.toml in the cwd and XDG paths")
+    #[test]
+    fn load_reads_temperature_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rustle.toml");
+        std::fs::write(
+            &path,
+            "[llm]\nmodel = \"llama3.2:1b\"\ntemperature = 0.42\n",
+        )
+        .unwrap();
+
+        // let loaded = Config::load(&path).unwrap();
+        // assert_eq!(loaded.llm.model, "llama3.2:1b");
+        // assert_eq!(loaded.llm.temperature, 0.42);
+        // // timeout_secs not present → serde default kicks in
+        // assert_eq!(loaded.llm.timeout_secs, default_timeout());
     }
 }

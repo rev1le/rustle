@@ -1,0 +1,106 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# rustle — example configuration
+#
+# Copy this file to `rustle.toml` (project root or ~/.config/rustle/config.toml)
+# and edit to taste. Every section and field is optional except [llm].model.
+#
+# ──────────────────────────────────────────────────────────────────────────────
+[scanner]
+ignored_dirs = [
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "target",
+    "build",
+    "dist",
+    ".next",
+    ".nuxt",
+    ".cache",
+]
+ignored_exts = ["map", "pyc", "pyo", "class"]
+
+
+[rules]
+keep_exts = [
+    "rs",
+    "go",
+    "ts",
+    "tsx",
+    "js",
+    "jsx",
+    "py",
+    "java",
+    "c",
+    "cpp",
+    "h",
+    "hpp",
+    "toml",
+    "yaml",
+    "yml",
+    "json",
+    "md",
+    "txt",
+    "pdf",
+    "docx",
+    "xlsx",
+    "cr2",
+    "cr3",
+    "nef",
+    "arw",
+    "raf",
+    "dng",
+    "xmp",
+    "psd",
+    "ai",
+    "tif",
+    "tiff",
+]
+
+trash_exts = [
+    "log",
+    "tmp",
+    "temp",
+    "bak",
+    "swp",
+    "swo",
+    "o",
+    "obj",
+    "exe",
+    "dll",
+    "so",
+    "dylib",
+    "DS_Store",
+]
+
+trash_patterns = [
+    "thumbs.db",
+    ".DS_Store",
+    "desktop.ini",
+    "*.tmp",
+    "*.bak",
+    "*~",
+    "npm-debug.log*",
+    "yarn-debug.log*",
+    "yarn-error.log*",
+]
+
+# Files that L2 heuristics score between this threshold and 0.8 (trash) /
+# 0.2 (keep) are sent to the LLM for a final verdict.
+# Range: 0.0–1.0. Lower → more files reach the LLM (slower, more accurate).
+llm_threshold = 0.5
+
+
+# Recommended CPU-friendly models (small → strong):
+#   qwen2.5:0.5b   ~0.6 GB   fastest, simple files
+#   llama3.2:1b    ~1.3 GB   Meta edge model
+#   qwen2.5:1.5b   ~1.7 GB   great JSON obedience
+#   qwen2.5:3b     ~2.8 GB   best quality/speed balance on CPU  ← recommended
+#   llama3.2:3b    ~2.8 GB   good JSON obedience
+#   phi3.5         ~3.5 GB   excellent reasoning
+[llm]
+model = "qwen2.5:3b"
+# endpoint = "http://localhost:11434"
+# temperature = 0.1.
+# timeout_secs = 120

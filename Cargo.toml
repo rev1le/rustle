@@ -10,67 +10,37 @@ name = "rustle"
 path = "src/main.rs"
 
 [dependencies]
-# Filesystem traversal
 walkdir = "2.5"
 ignore = "0.4"
-
-# Parallelism
 rayon = "1.10"
-
-# CLI
 clap = { version = "4.5", features = ["derive"] }
-
-# Progress bars
 indicatif = "0.17"
-
-# TUI (Stage 4 — optional)
 ratatui = "0.28"
 crossterm = "0.28"
-
-# Serialization and config
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
-
-# Hashing (LLM cache key + duplicate detection)
 blake3 = "1.5"
-
-# Embedded KV-DB for the classification cache (Stage 3)
 sled = "0.34"
-
-# Default cache location (OS-specific cache dir)
 dirs = "5"
-
-# Local LLM (Stage 3): Ollama API client
 reqwest = { version = "0.12", features = [
   "blocking",
   "json",
-], default-features = false, optional = true }
-
-# Logging
+], default-features = false }
 log = "0.4"
 env_logger = "0.11"
-
-# Time handling
 chrono = { version = "0.4", features = ["serde"] }
-
-# Error handling
 anyhow = "1"
 thiserror = "1"
-
-# Clipboard (copy path in TUI)
 arboard = "3"
 
 [features]
 default = []
-# Enable local LLM integration (Ollama)
-llm = ["dep:reqwest"]
+llm = []
 
 [dev-dependencies]
-# Temp directories for cache tests
 tempfile = "3"
 
-# Linting discipline (Chapter 2.5): clippy::all at package level
 [lints.clippy]
 all = "warn"
 

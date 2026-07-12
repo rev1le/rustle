@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use indicatif::{ProgressBar, ProgressStyle};
 use walkdir::{DirEntry, WalkDir};
 
-use crate::config::IgnoreConfig;
+use crate::config::ScannerConfig;
 use crate::error::RustleError;
 use crate::models::FileMeta;
 
@@ -19,7 +19,7 @@ pub struct ScanOptions {
     /// Maximum depth (None — unlimited)
     pub max_depth: Option<usize>,
     /// Ignored directories/extensions
-    pub ignore: IgnoreConfig,
+    pub ignore: ScannerConfig,
 }
 
 /// Collected file metadata
@@ -70,13 +70,13 @@ fn get_file_meta(entry: &DirEntry, ignore_exts: &[String]) -> Option<FileMeta> {
 
 /// Recursively traverse `root`
 pub fn scan(options: &ScanOptions) -> Result<ScanResult, RustleError> {
-    let IgnoreConfig {
-        ref ignore_dirs,
-        ref ignore_exts,
+    let ScannerConfig {
+        ref ignored_dirs,
+        ref ignored_exts,
     } = options.ignore;
 
-    let ignore_dirs = utils::to_lowercase_vec(ignore_dirs);
-    let ignore_exts = utils::to_lowercase_vec(ignore_exts);
+    let ignore_dirs = utils::to_lowercase_vec(ignored_dirs);
+    let ignore_exts = utils::to_lowercase_vec(ignored_exts);
 
     let walker = WalkDir::new(&options.root);
     let walker = match options.max_depth {
