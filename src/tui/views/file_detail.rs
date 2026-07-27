@@ -21,15 +21,10 @@ const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 /// Async LLM classification status, updated from a background thread.
 #[derive(Debug, Clone, PartialEq)]
 enum LlmStatus {
-    /// No LLM configured.
     Disabled,
-    /// LLM available, but not requested yet (press `k`).
     Idle,
-    /// Request in flight.
     Loading,
-    /// Model returned a verdict.
     Done(Classification),
-    /// Request failed (Ollama down, parse error, declined, etc.).
     Failed(String),
 }
 
@@ -38,9 +33,8 @@ pub(in crate::tui) struct FileDetailScreen {
     file: FileMeta,
     /// Classifier used for both the L2 verdict and the on-demand L3 verdict.
     classifier: Arc<Classifier>,
-    /// Heuristic verdict, computed once when the screen opens. Always concrete
-    /// (Uncertain carries its score) so a decision is visible before the LLM runs.
-    heuristics: (Classification, String),
+    heuristics_verdict: Classification,
+    heuristics_score: f32,
     /// On-demand LLM classification status.
     status: LlmStatus,
     /// Receiver for the background classification worker (cleared on done).
@@ -51,8 +45,8 @@ pub(in crate::tui) struct FileDetailScreen {
 
 impl FileDetailScreen {
     pub(in crate::tui) fn new(file: FileMeta, classifier: Arc<Classifier>) -> Self {
-        // L2 runs synchronously and is cheap — show it immediately.
-        let heuristics = classifier.classify_l2(&file);
+        let heuristics_verdict = classifier.classify_l2(&file);
+        let heuristics_score = classifier.score_l2(&file);
         let status = if classifier.llm_model_name().is_some() {
             LlmStatus::Idle
         } else {
@@ -61,7 +55,8 @@ impl FileDetailScreen {
         Self {
             file,
             classifier,
-            heuristics,
+            heuristics_verdict,
+            heuristics_score,
             status,
             rx: None,
             spin: 0,
@@ -91,7 +86,6 @@ impl FileDetailScreen {
         thread::spawn(move || {
             let result = classifier
                 .classify_llm(&file)
-                .map(|(c, _)| c)
                 .ok_or_else(|| "LLM declined to classify this file".to_string());
             // best-effort send; if the screen was dropped, the receiver is gone
             let _ = tx.send(result);
@@ -125,7 +119,7 @@ fn verdict_badge(c: &Classification) -> Span<'static> {
     let (label, color) = match c {
         Classification::Keep => ("KEEP", Color::Green),
         Classification::Trash => ("TRASH", Color::Red),
-        Classification::Uncertain(_) => ("UNCERTAIN", Color::Yellow),
+        Classification::Uncertain => ("UNCERTAIN", Color::Yellow),
     };
     Span::styled(
         format!("  {label}  "),
@@ -141,14 +135,25 @@ fn llm_detail(c: &Classification) -> String {
     match c {
         Classification::Keep => "the model suggests keeping it".into(),
         Classification::Trash => "safe to delete".into(),
-        Classification::Uncertain(s) => format!("model is unsure (confidence {s:.2})"),
+        Classification::Uncertain => "model is unsure".into(),
     }
 }
 
-/// Spans for the L2 heuristics line (always shown, always a concrete verdict).
-fn heuristics_spans(verdict: &(Classification, String)) -> Vec<Span<'static>> {
-    let (class, reason) = verdict;
-    vec![verdict_badge(class), Span::raw(format!(" {reason}"))]
+/// Spans for the L2 heuristics line.
+fn heuristics_spans(verdict: Classification, score: f32) -> Vec<Span<'static>> {
+    match verdict {
+        Classification::Uncertain => vec![
+            verdict_badge(&verdict),
+            Span::raw(format!(" {}", crate::explain_classification::declined())),
+        ],
+        class => vec![
+            verdict_badge(&class),
+            Span::raw(format!(
+                " {}",
+                crate::explain_classification::heuristics(class, score)
+            )),
+        ],
+    }
 }
 
 /// Spans for the L3 LLM line (status-driven).
@@ -190,7 +195,8 @@ fn llm_spans(status: &LlmStatus, spin: usize, model: &str) -> Vec<Span<'static>>
 /// Render the screen. Kept free of `&self` so it borrows nothing while drawing.
 fn render_detail(
     file: &FileMeta,
-    heuristics: &(Classification, String),
+    heuristics_verdict: Classification,
+    heuristics_score: f32,
     status: &LlmStatus,
     spin: usize,
     model: &str,
@@ -252,7 +258,7 @@ fn render_detail(
     // classification block: L2 line first, L3 line below
     let class_title = format!(" Classification (LLM: {model}) ");
     let class_lines = vec![
-        Line::from(heuristics_spans(heuristics)),
+        Line::from(heuristics_spans(heuristics_verdict, heuristics_score)),
         Line::from(llm_spans(status, spin, model)),
     ];
     frame.render_widget(
@@ -275,7 +281,8 @@ impl Screen for FileDetailScreen {
         let model = self.classifier.llm_model_name().unwrap_or("(none)");
         render_detail(
             &self.file,
-            &self.heuristics,
+            self.heuristics_verdict,
+            self.heuristics_score,
             &self.status,
             self.spin,
             model,
@@ -344,8 +351,7 @@ mod tests {
     fn heuristics_verdict_is_available_on_open() {
         // Fresh, small, clean-path file → L2 returns a confident Keep.
         let screen = FileDetailScreen::new(sample_file(), Arc::new(classifier()));
-        let (class, _) = &screen.heuristics;
-        assert_eq!(*class, Classification::Keep);
+        assert_eq!(screen.heuristics_verdict, Classification::Keep);
         // LLM not requested yet → Idle (no LLM configured in the fixture).
         assert_eq!(screen.status, LlmStatus::Disabled);
     }
@@ -391,17 +397,22 @@ mod tests {
 
     #[test]
     fn heuristics_spans_shows_verdict_badge() {
-        let spans = heuristics_spans(&(Classification::Keep, "L2 heuristics: keep".into()));
+        let spans = heuristics_spans(Classification::Keep, 0.1);
         assert!(spans.iter().any(|s| s.content.contains("KEEP")));
     }
 
     #[test]
     fn heuristics_spans_uncertain_shows_score_badge() {
-        let spans = heuristics_spans(&(
-            Classification::Uncertain(0.45),
-            "L2 heuristics: uncertain (score 0.45)".into(),
-        ));
+        let spans = heuristics_spans(Classification::Uncertain, 0.45);
         assert!(spans.iter().any(|s| s.content.contains("UNCERTAIN")));
+    }
+
+    #[test]
+    fn heuristics_spans_uncertain_uses_placeholder_text() {
+        // Uncertain verdict → neutral placeholder, not the score line.
+        let spans = heuristics_spans(Classification::Uncertain, 0.5);
+        assert!(spans.iter().any(|s| s.content.contains("uncertain")));
+        assert!(spans.iter().any(|s| s.content.contains("awaiting LLM")));
     }
 
     #[test]

@@ -8,7 +8,7 @@ use blake3::Hasher;
 use crate::error::RustleError;
 use crate::models::Classification;
 
-/// Streaming read buffer for hashing (64 KiB)
+/// Streaming read buffer for hashing
 const HASH_BUF_SIZE: usize = 64 * 1024;
 
 /// Classification cache on `sled`, keyed by content hash
@@ -124,17 +124,14 @@ mod tests {
     }
 
     #[test]
-    fn put_then_get_preserves_uncertain_score() {
+    fn put_then_get_preserves_uncertain_verdict() {
         let dir = tempfile::tempdir().unwrap();
         let cache = ClassificationCache::open(dir.path()).unwrap();
         let hash = [1u8; 32];
 
-        cache.put(&hash, Classification::Uncertain(0.42)).unwrap();
+        cache.put(&hash, Classification::Uncertain).unwrap();
 
-        assert_eq!(
-            cache.get(&hash).unwrap(),
-            Some(Classification::Uncertain(0.42))
-        );
+        assert_eq!(cache.get(&hash).unwrap(), Some(Classification::Uncertain));
     }
 
     #[test]

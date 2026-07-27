@@ -30,9 +30,12 @@ A Rust utility for disk space analysis that classifies files as "needed" / "tras
 enum Classification {
     Keep,
     Trash,
-    Uncertain(f32), // score → threshold for invoking the LLM
+    Uncertain,
 }
 ```
+The numeric trash-confidence score (`0.0..=1.0`) is exposed by each layer's
+`ClassifierLayer::score`, not by the enum variant — a `Classification` is purely
+categorical.
 
 ## Road-map
 

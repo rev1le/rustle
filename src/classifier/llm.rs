@@ -106,11 +106,12 @@ impl LlmClient {
     }
 
     /// Send a request to the local LLM and parse the verdict.
-    ///
-    /// Requires the `llm` feature. Returns [`RustleError::Llm`] on network,
-    /// HTTP, or parsing failures.
-    // #[cfg(feature = "llm")]
     pub fn ask(&self, prompt: &str) -> Result<Classification, RustleError> {
+        Ok(self.fetch_verdict(prompt)?.to_classification())
+    }
+
+    /// POST the prompt to Ollama and decode the raw [`Verdict`].
+    fn fetch_verdict(&self, prompt: &str) -> Result<Verdict, RustleError> {
         use std::time::Duration;
 
         let client = reqwest::blocking::Client::builder()
@@ -147,8 +148,7 @@ impl LlmClient {
             .json()
             .map_err(|e| RustleError::Llm(format!("decode Ollama response: {e}")))?;
 
-        let verdict = parse_verdict(&payload.response)?;
-        Ok(verdict.to_classification())
+        parse_verdict(&payload.response)
     }
 
     // /// Fallback when the `llm` feature is disabled.
@@ -161,25 +161,37 @@ impl LlmClient {
 }
 
 impl ClassifierLayer for LlmClient {
-    fn classify(&self, file: &FileMeta) -> Option<(Classification, String)> {
+    fn score(&self, file: &FileMeta) -> f32 {
         let prompt = self.build_prompt(file);
-        match self.ask(&prompt) {
-            Ok(class) => {
-                let reason = format!("L3 LLM ({}): verdict from local model", self.model);
-                Some((class, reason))
-            }
-            Err(e) => {
-                // L3 is best-effort: on failure, decline so the cascade keeps
-                // the L2 heuristic verdict instead of erroring out.
-                log::warn!("LLM classify failed for {:?}: {e}", file.path);
-                None
-            }
-        }
+        let verdict = match self.fetch_verdict(&prompt) {
+            Ok(v) => v,
+            // Network/HTTP/parse failure → no opinion, defer to the cascade.
+            Err(_) => return 0.5,
+        };
+        score_from_verdict(&verdict)
+    }
+}
+
+fn score_from_verdict(verdict: &Verdict) -> f32 {
+    let conf = verdict
+        .confidence
+        .map(|c| (c as f32).clamp(0.0, 1.0))
+        .unwrap_or(0.5);
+
+    let label = verdict
+        .verdict
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_ascii_lowercase);
+
+    match label.as_deref() {
+        Some(v) if v.starts_with("trash") || v.starts_with("delete") => conf,
+        Some(v) if v.starts_with("keep") => 1.0 - conf,
+        _ => 0.5,
     }
 }
 
 /// JSON schema for Ollama's `format` field → guaranteed structured output.
-// #[cfg(feature = "llm")]
 fn verdict_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",
@@ -221,11 +233,6 @@ struct Verdict {
 impl Verdict {
     /// Map the model's verdict onto the domain `Classification`.
     fn to_classification(&self) -> Classification {
-        let confidence = self
-            .confidence
-            .map(|c| (c as f32).clamp(0.0, 1.0))
-            .unwrap_or(0.5);
-
         let verdict = self
             .verdict
             .as_deref()
@@ -235,8 +242,9 @@ impl Verdict {
         match verdict.as_deref() {
             Some(v) if v.starts_with("keep") => Classification::Keep,
             Some(v) if v.starts_with("trash") || v.starts_with("delete") => Classification::Trash,
-            Some(v) if v.starts_with("uncertain") => Classification::Uncertain(confidence),
-            _ => Classification::Uncertain(confidence),
+            // "uncertain", unknown verdict, or missing — let the caller
+            // escalate via the cascade.
+            _ => Classification::Uncertain,
         }
     }
 
@@ -278,9 +286,6 @@ fn extract_json_object(raw: &str) -> Option<&str> {
 }
 
 /// Build a compact description of the sibling files (same directory).
-///
-/// Returns extension hints + a few example names. Fails softly on any I/O
-/// error or when there is no parent directory.
 fn describe_siblings(path: &std::path::Path) -> String {
     let Some(dir) = path.parent() else {
         return "(no parent directory)".into();
@@ -378,18 +383,15 @@ mod tests {
             confidence: Some(0.42),
             reason: None,
         };
-        assert_eq!(
-            uncertain.to_classification(),
-            Classification::Uncertain(0.42)
-        );
+        assert_eq!(uncertain.to_classification(), Classification::Uncertain);
 
-        // Unknown verdict → Uncertain, clamped confidence.
+        // Unknown verdict → Uncertain (confidence is dropped, see `to_classification`).
         let weird = Verdict {
             verdict: Some("maybe".into()),
             confidence: Some(5.0),
             reason: None,
         };
-        assert_eq!(weird.to_classification(), Classification::Uncertain(1.0));
+        assert_eq!(weird.to_classification(), Classification::Uncertain);
     }
 
     // #[cfg(feature = "llm")]
@@ -400,7 +402,7 @@ mod tests {
             confidence: None,
             reason: None,
         };
-        assert_eq!(empty.to_classification(), Classification::Uncertain(0.5));
+        assert_eq!(empty.to_classification(), Classification::Uncertain);
     }
 
     // #[cfg(feature = "llm")]
@@ -433,5 +435,56 @@ mod tests {
         );
         assert_eq!(extract_json_object("no braces here"), None);
         assert_eq!(extract_json_object("{unbalanced"), None);
+    }
+
+    #[test]
+    fn score_from_verdict_maps_axes() {
+        // trash with confidence 0.9 → 0.9
+        let trash = Verdict {
+            verdict: Some("trash".into()),
+            confidence: Some(0.9),
+            reason: None,
+        };
+        assert!((score_from_verdict(&trash) - 0.9).abs() < 1e-6);
+
+        // keep with confidence 0.9 → 1 - 0.9 = 0.1
+        let keep = Verdict {
+            verdict: Some("keep".into()),
+            confidence: Some(0.9),
+            reason: None,
+        };
+        assert!((score_from_verdict(&keep) - 0.1).abs() < 1e-6);
+
+        // uncertain → 0.5 regardless of confidence
+        let uncertain = Verdict {
+            verdict: Some("uncertain".into()),
+            confidence: Some(0.99),
+            reason: None,
+        };
+        assert!((score_from_verdict(&uncertain) - 0.5).abs() < 1e-6);
+
+        // unknown label → 0.5
+        let weird = Verdict {
+            verdict: Some("maybe".into()),
+            confidence: Some(0.7),
+            reason: None,
+        };
+        assert!((score_from_verdict(&weird) - 0.5).abs() < 1e-6);
+
+        // missing confidence → defaults to 0.5
+        let no_conf = Verdict {
+            verdict: Some("trash".into()),
+            confidence: None,
+            reason: None,
+        };
+        assert!((score_from_verdict(&no_conf) - 0.5).abs() < 1e-6);
+
+        // out-of-range confidence is clamped
+        let overflow = Verdict {
+            verdict: Some("trash".into()),
+            confidence: Some(5.0),
+            reason: None,
+        };
+        assert!((score_from_verdict(&overflow) - 1.0).abs() < 1e-6);
     }
 }

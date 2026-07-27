@@ -2,7 +2,7 @@
 
 use crate::classifier::ClassifierLayer;
 use crate::config::RulesConfig;
-use crate::models::{Classification, FileMeta};
+use crate::models::FileMeta;
 
 /// Compiled L1 rules
 #[expect(
@@ -20,9 +20,6 @@ pub struct Rules {
 
 impl Rules {
     /// Build from TOML config.
-    ///
-    /// Extensions are lowercased for case-insensitive matching; patterns are
-    /// stored verbatim (matched as simple `*` globs by the heuristic layer).
     pub fn from_config(config: &RulesConfig) -> Self {
         Self {
             keep_exts: config
@@ -41,9 +38,11 @@ impl Rules {
 }
 
 impl ClassifierLayer for Rules {
-    fn classify(&self, file: &FileMeta) -> Option<(Classification, String)> {
+    fn score(&self, file: &FileMeta) -> f32 {
         let _ = file;
-        // @todo keep_exts→Keep, trash_exts→Trash, pattern match→Trash, else None (→L2)
-        todo!("apply hard rules to {:?}", file.path)
+        // @todo keep_exts→0.0, trash_exts→1.0, pattern match→1.0, else 0.5
+        // so the cascade escalates to L2 heuristics for files we have no
+        // strong opinion on.
+        todo!("score {:?} against hard rules", file.path)
     }
 }

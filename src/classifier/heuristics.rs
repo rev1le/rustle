@@ -6,36 +6,15 @@ use chrono::Utc;
 
 use crate::classifier::ClassifierLayer;
 use crate::config::RulesConfig;
-use crate::models::{Classification, FileMeta};
+use crate::models::FileMeta;
 
-/// Weight of the age signal in the overall score.
 const AGE_WEIGHT: f32 = 0.4;
-/// Weight of the size signal in the overall score.
 const SIZE_WEIGHT: f32 = 0.3;
-/// Weight of the path signal in the overall score.
 const PATH_WEIGHT: f32 = 0.3;
-
-/// `score >= this` is confident enough for [`Classification::Trash`].
-const TRASH_THRESHOLD: f32 = 0.8;
-/// `score <= this` is confident enough for [`Classification::Keep`].
-const KEEP_THRESHOLD: f32 = 0.2;
-
-/// How strongly a `keep_exts` match pulls the score toward Keep (0.0).
-///
-/// A high weight: valuable file types (source, docs, media masters) are
-/// protected unless the other signals are overwhelmingly trashy.
 const KEEP_EXT_WEIGHT: f32 = 0.8;
-
-/// How strongly a `trash_exts` / `trash_patterns` match pulls the score toward
-/// Trash (1.0). Lower than [`KEEP_EXT_WEIGHT`] on purpose: disposable-looking
-/// extensions can still matter (active logs), so the pull is softer and the
-/// L3 LLM gets a look at borderline cases.
 const TRASH_EXT_WEIGHT: f32 = 0.5;
 
 /// Path components that mark a file as disposable.
-///
-/// Matched case-insensitively against each path segment, so both directory
-/// names (`node_modules`) and dotted ones (`.cache`) are recognised.
 const TRASHY_SEGMENTS: &[&str] = &[
     "cache",
     ".cache",
@@ -75,28 +54,6 @@ impl Heuristics {
         }
     }
 
-    /// Trash-confidence score in `0.0..=1.0`.
-    ///
-    /// Starts from a weighted sum of three independent signals:
-    /// - **age** (40%): older → more likely disposable
-    /// - **size** (30%): larger → costlier to keep
-    /// - **path** (30%): cache/temp/build locations → disposable
-    ///
-    /// Then refined by the file's extension/name against the stored config:
-    /// - `keep_exts` → strong pull toward Keep
-    /// - `trash_exts` / `trash_patterns` → softer pull toward Trash
-    pub fn score(&self, file: &FileMeta) -> f32 {
-        let age_days = Utc::now()
-            .signed_duration_since(file.mtime)
-            .num_days()
-            .max(0);
-        let age = self.age_signal(age_days);
-        let size = self.size_signal(file.size);
-        let path = path_signal(&file.path);
-        let base = (AGE_WEIGHT * age + SIZE_WEIGHT * size + PATH_WEIGHT * path).clamp(0.0, 1.0);
-        self.ext_bias(file, base)
-    }
-
     /// Age signal `0.0..=1.0`: rises linearly, saturating at `stale_age_days`.
     fn age_signal(&self, age_days: i64) -> f32 {
         let stale = self.stale_age_days.max(1) as f32;
@@ -113,7 +70,6 @@ impl Heuristics {
     fn ext_bias(&self, file: &FileMeta, base: f32) -> f32 {
         let ext = file.ext.as_deref().filter(|e| !e.is_empty());
 
-        // keep_exts → high-confidence keep: protect valuable file types.
         if ext.is_some_and(|e| {
             self.config
                 .keep_exts
@@ -145,22 +101,17 @@ impl Heuristics {
 }
 
 impl ClassifierLayer for Heuristics {
-    fn classify(&self, file: &FileMeta) -> Option<(Classification, String)> {
-        let score = self.score(file);
-        if score >= TRASH_THRESHOLD {
-            Some((
-                Classification::Trash,
-                format!("L2 heuristics: high trash score ({score:.2})"),
-            ))
-        } else if score <= KEEP_THRESHOLD {
-            Some((
-                Classification::Keep,
-                format!("L2 heuristics: low trash score ({score:.2})"),
-            ))
-        } else {
-            // Uncertain: decline so the L3 LLM gets a chance to decide.
-            None
-        }
+    /// Trash-confidence score in `0.0..=1.0`.
+    fn score(&self, file: &FileMeta) -> f32 {
+        let age_days = Utc::now()
+            .signed_duration_since(file.mtime)
+            .num_days()
+            .max(0);
+        let age = self.age_signal(age_days);
+        let size = self.size_signal(file.size);
+        let path = path_signal(&file.path);
+        let base = (AGE_WEIGHT * age + SIZE_WEIGHT * size + PATH_WEIGHT * path).clamp(0.0, 1.0);
+        self.ext_bias(file, base)
     }
 }
 
@@ -189,15 +140,11 @@ fn path_signal(path: &Path) -> f32 {
 }
 
 /// Tiny glob matcher supporting only `*` (match any run of characters).
-///
-/// Case sensitivity is the caller's responsibility; both sides are expected
-/// to be pre-normalised. Implements the standard iterative backtracking
-/// wildcard algorithm (LeetCode 44).
 fn glob_match(text: &str, pattern: &str) -> bool {
     let text = text.as_bytes();
     let pat = pattern.as_bytes();
     let (mut ti, mut pi) = (0usize, 0usize);
-    let mut star: Option<(usize, usize)> = None; // (pattern idx after '*', text idx)
+    let mut star: Option<(usize, usize)> = None;
 
     while ti < text.len() {
         if pi < pat.len() && pat[pi] == text[ti] {
@@ -225,6 +172,9 @@ mod tests {
     use super::*;
     use chrono::Duration;
     use std::path::PathBuf;
+
+    use crate::classifier::{KEEP_THRESHOLD, TRASH_THRESHOLD};
+    use crate::models::Classification;
 
     fn heuristics() -> Heuristics {
         Heuristics::new(RulesConfig::default())
@@ -280,15 +230,21 @@ mod tests {
     fn classify_keeps_fresh_clean_file() {
         let h = heuristics();
         let f = file_at("/home/me/src/main.rs", 2_000, 3);
-        let (class, _) = h.classify(&f).expect("L2 should decide");
-        assert_eq!(class, Classification::Keep);
+        assert_eq!(h.classify(&f), Classification::Keep);
     }
 
     #[test]
-    fn classify_declines_middle_band() {
+    fn classify_returns_uncertain_in_middle_band() {
         let h = heuristics();
         let f = file_at("/home/me/notes/old.txt", 500, 400);
-        assert_eq!(h.classify(&f), None);
+        // Middle score → `Uncertain` (no payload). The score itself stays on
+        // the layer and is available via `Heuristics::score`.
+        assert_eq!(h.classify(&f), Classification::Uncertain);
+        let s = h.score(&f);
+        assert!(
+            (KEEP_THRESHOLD..=TRASH_THRESHOLD).contains(&s),
+            "score {s} should be inside the uncertain band"
+        );
     }
 
     // --- extension / pattern bias ------------------------------------------
@@ -301,8 +257,7 @@ mod tests {
         // Old + large but clean path: base = age(0.4) + size(0.3) = 0.7, which
         // on its own is Uncertain. With keep_ext it must be pulled to Keep.
         let f = file_at("/home/me/src/legacy.rs", 600 * 1024 * 1024, 400);
-        let (class, _) = h.classify(&f).expect("L2 should decide");
-        assert_eq!(class, Classification::Keep);
+        assert_eq!(h.classify(&f), Classification::Keep);
     }
 
     #[test]
@@ -312,8 +267,7 @@ mod tests {
         let h = Heuristics::new(cfg);
         // base 0.7 → trash bias pulls it past the 0.8 threshold.
         let f = file_at("/var/app/server.log", 600 * 1024 * 1024, 400);
-        let (class, _) = h.classify(&f).expect("L2 should decide");
-        assert_eq!(class, Classification::Trash);
+        assert_eq!(h.classify(&f), Classification::Trash);
     }
 
     #[test]
@@ -323,8 +277,7 @@ mod tests {
         cfg.trash_patterns.push("thumbs.db".into());
         let h = Heuristics::new(cfg);
         let f = file_at("/pics/thumbs.db", 600 * 1024 * 1024, 400);
-        let (class, _) = h.classify(&f).expect("L2 should decide");
-        assert_eq!(class, Classification::Trash);
+        assert_eq!(h.classify(&f), Classification::Trash);
     }
 
     #[test]
@@ -346,8 +299,7 @@ mod tests {
         cfg.trash_exts.push("log".into());
         let h = Heuristics::new(cfg);
         let f = file_at("/var/app/server.log", 600 * 1024 * 1024, 400);
-        let (class, _) = h.classify(&f).expect("L2 should decide");
-        assert_eq!(class, Classification::Keep);
+        assert_eq!(h.classify(&f), Classification::Keep);
     }
 
     // --- signal helpers ----------------------------------------------------

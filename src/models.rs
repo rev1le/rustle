@@ -6,20 +6,20 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Result of classifying a file
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Classification {
     /// Definitely keep
     Keep,
     /// Definitely delete
     Trash,
-    /// Needs a closer look; score 0.0..=1.0 is confidence it's trash
-    Uncertain(f32),
+    /// Needs a closer look
+    Uncertain,
 }
 
 impl Classification {
     /// Whether this needs no LLM
     pub fn is_final(&self) -> bool {
-        !matches!(self, Classification::Uncertain(_))
+        !matches!(self, Classification::Uncertain)
     }
 }
 
@@ -114,9 +114,7 @@ mod tests {
         assert!(Classification::Keep.is_final());
         assert!(Classification::Trash.is_final());
         // Uncertain always needs a closer look
-        assert!(!Classification::Uncertain(0.0).is_final());
-        assert!(!Classification::Uncertain(0.5).is_final());
-        assert!(!Classification::Uncertain(0.99).is_final());
+        assert!(Classification::Uncertain.is_final() == false);
     }
 
     #[test]
