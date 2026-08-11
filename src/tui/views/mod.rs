@@ -1,28 +1,17 @@
-//! TUI screens + common interface
+pub mod main_view;
 
-mod file_detail;
-mod main;
+pub use main_view::MainView;
 
-use crossterm::event::KeyEvent;
-use ratatui::Frame;
+use ratatui::{Frame, crossterm::event::KeyEvent};
 
-use crate::models::FileMeta;
-
-pub(super) use file_detail::FileDetailScreen;
-pub(super) use main::MainScreen;
-
-/// Screen id
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum View {
+pub enum View {
     Main,
-    FileDetail,
 }
 
-pub(super) enum Action {
+pub enum Action {
     None,
     Quit,
-    Back,
-    OpenDetail(FileMeta),
 }
 
 /// Common behavior for all screens
