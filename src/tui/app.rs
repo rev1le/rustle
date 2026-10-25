@@ -7,17 +7,19 @@ use crate::tui::views::Action;
 
 use super::views::{MainView, Screen, View};
 
-type ViewsMapType = HashMap<View, Box<dyn Screen>>;
+type ViewsMap = HashMap<View, Box<dyn Screen>>;
 
 pub(super) struct App {
     active: View,
-    views: ViewsMapType,
+    views: ViewsMap,
 }
 
 impl App {
     pub(super) fn new() -> Self {
-        let mut views: ViewsMapType = HashMap::new();
-        views.insert(View::Main, Box::new(MainView::new()));
+        let mut views: ViewsMap = HashMap::new();
+
+        let main_view = MainView::new();
+        views.insert(main_view.get_type(), Box::new(main_view));
 
         Self {
             active: View::Main,
@@ -34,7 +36,7 @@ impl App {
     }
 
     /// Draw the active view
-    pub fn draw_active(&mut self, frame: &mut Frame) {
+    pub fn draw_view(&mut self, frame: &mut Frame) {
         self.screen_mut().draw(frame);
     }
 

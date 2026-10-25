@@ -24,4 +24,6 @@ pub(super) trait Screen {
 
     /// Advance timers/animation one step
     fn tick(&mut self) {}
+
+    fn get_type(&self) -> View;
 }
