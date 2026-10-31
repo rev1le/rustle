@@ -1,4 +1,5 @@
 mod app;
+mod session;
 mod terminal;
 mod views;
 
@@ -18,10 +19,10 @@ pub fn run() -> Result<(), RustleError> {
     let mut guard = TerminalGuard::new()?;
 
     loop {
-        guard.terminal.draw(|frame| app.draw_active(frame))?;
+        guard.terminal.draw(|frame| app.draw_view(frame))?;
+        app.tick();
 
         if !event::poll(Duration::from_millis(TICK_MS))? {
-            app.tick();
             continue;
         }
 

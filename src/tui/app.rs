@@ -1,51 +1,91 @@
-use std::collections::HashMap;
-
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 
-use crate::tui::views::Action;
+use crate::tui::{session::Session, views::Action};
 
-use super::views::{MainView, Screen, View};
+use super::views::{AddPathView, MainView, ScanView, Screen, View};
 
-type ViewsMapType = HashMap<View, Box<dyn Screen>>;
+/// The single active screen. Adding a view means adding a variant here.
+pub(super) enum Active {
+    Main(MainView),
+    AddPath(AddPathView),
+    Scan(ScanView),
+}
+
+impl Active {
+    /// Single factory for screens: adding a view means adding a variant here.
+    fn new(view: View) -> Self {
+        match view {
+            View::Main => Active::Main(MainView::new()),
+            View::AddPath => Active::AddPath(AddPathView::new()),
+            View::Scan => Active::Scan(ScanView),
+        }
+    }
+
+    fn screen_mut(&mut self) -> &mut dyn Screen {
+        match self {
+            Active::Main(view) => view,
+            Active::AddPath(view) => view,
+            Active::Scan(view) => view,
+        }
+    }
+
+    fn is_main(&self) -> bool {
+        matches!(self, Active::Main(_))
+    }
+}
 
 pub(super) struct App {
-    active: View,
-    views: ViewsMapType,
+    active: Active,
+    session: Session,
 }
 
 impl App {
     pub(super) fn new() -> Self {
-        let mut views: ViewsMapType = HashMap::new();
-        views.insert(View::Main, Box::new(MainView::new()));
-
         Self {
-            active: View::Main,
-            views,
+            active: Active::new(View::Main),
+            session: Session::default(),
         }
     }
 
-    /// Active screen, mutably
-    fn screen_mut(&mut self) -> &mut dyn Screen {
-        self.views
-            .get_mut(&self.active)
-            .expect("active screen always present")
-            .as_mut()
-    }
-
     /// Draw the active view
-    pub fn draw_active(&mut self, frame: &mut Frame) {
-        self.screen_mut().draw(frame);
+    pub fn draw_view(&mut self, frame: &mut Frame) {
+        let Self { active, session } = self;
+        active.screen_mut().draw(frame, session);
     }
 
     /// Advance timers/animation one step
     pub fn tick(&mut self) {
-        self.screen_mut().tick();
+        self.active.screen_mut().tick();
     }
 
-    /// Dispatch a key to the active screen
+    /// Dispatch a key to the active screen, resolving navigation actions.
     pub fn handle_key(&mut self, key: KeyEvent) -> Action {
-        let action = self.screen_mut().handle_key(key);
-        return action;
+        let action = {
+            let Self { active, session } = self;
+            active.screen_mut().handle_key(key, session)
+        };
+        self.apply(action)
+    }
+
+    fn apply(&mut self, action: Action) -> Action {
+        match action {
+            Action::Navigate(view) => {
+                self.active = Active::new(view);
+                Action::None
+            }
+            // Back on the first view means "there is nowhere left to go".
+            Action::Back if self.active.is_main() => Action::Quit,
+            // shortcut: Back re-creates MainView, so unfinished input is lost;
+            // keep the view in App instead if that starts to matter.
+            Action::Back => {
+                self.active = Active::new(View::Main);
+                Action::None
+            }
+            other => other,
+        }
     }
 }
+
+#[cfg(test)]
+mod tests;
